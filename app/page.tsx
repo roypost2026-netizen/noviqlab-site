@@ -1,65 +1,129 @@
-import Image from "next/image";
+import Link from "next/link";
+
+const activities = [
+  {
+    title: "TownCheck",
+    description:
+      "居住地選びを支援する住みやすさ情報プラットフォーム「TownCheck」の開発・運営",
+  },
+  {
+    title: "AI ワークフロー",
+    description: "生成AIを活用した業務効率化ワークフローの設計・構築",
+  },
+  {
+    title: "Web / SaaS 開発",
+    description: "WebアプリケーションおよびSaaSプロダクトの企画・開発",
+  },
+  {
+    title: "福祉・医療支援",
+    description: "福祉・医療分野向け業務支援システムの設計・開発",
+  },
+  {
+    title: "NPO・文化団体 DX",
+    description:
+      "NPO・文化団体のデジタル化支援（仮想ギャラリー・地域文化DXなど）",
+  },
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="flex-1 flex flex-col">
+      {/* Header */}
+      <header className="border-b border-slate-800">
+        <div className="max-w-4xl mx-auto px-6 py-5 flex items-center justify-between">
+          <span className="font-mono text-lg font-semibold tracking-tight text-white">
+            NoviqLab
+          </span>
+          <Link
+            href="/contact"
+            className="text-sm text-slate-400 hover:text-white transition-colors"
+          >
+            Contact
+          </Link>
+        </div>
+      </header>
+
+      {/* Hero */}
+      <section className="max-w-4xl mx-auto px-6 py-20 sm:py-32 w-full">
+        <div className="mb-4">
+          <span className="inline-block font-mono text-xs text-sky-400 tracking-widest uppercase border border-sky-800 rounded px-2 py-1">
+            ノヴィックラボ
+          </span>
+        </div>
+        <h1 className="text-3xl sm:text-5xl font-bold text-white leading-tight mb-6">
+          AI × DX × システム開発
+        </h1>
+        <p className="text-slate-400 text-base sm:text-lg leading-relaxed max-w-2xl">
+          NoviqLab（ノヴィックラボ）は、AI技術の活用・DX支援・システム開発を手がける日本のプロジェクトです。
+        </p>
+      </section>
+
+      {/* Divider */}
+      <div className="max-w-4xl mx-auto px-6 w-full">
+        <div className="border-t border-slate-800" />
+      </div>
+
+      {/* Activities */}
+      <section className="max-w-4xl mx-auto px-6 py-16 w-full">
+        <h2 className="font-mono text-xs text-slate-500 tracking-widest uppercase mb-10">
+          主な活動
+        </h2>
+        <ul className="space-y-6">
+          {activities.map((item) => (
+            <li key={item.title} className="flex gap-4">
+              <span className="mt-2 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-sky-500 ring-4 ring-sky-500/20" />
+              <div>
+                <span className="block text-xs font-mono text-sky-400 mb-1">
+                  {item.title}
+                </span>
+                <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+                  {item.description}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Divider */}
+      <div className="max-w-4xl mx-auto px-6 w-full">
+        <div className="border-t border-slate-800" />
+      </div>
+
+      {/* CTA */}
+      <section className="max-w-4xl mx-auto px-6 py-16 w-full">
+        <p className="text-slate-400 text-sm mb-6">
+          プロジェクトへのご相談・ご連絡はこちらから
+        </p>
+        <Link
+          href="/contact"
+          className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium px-6 py-3 rounded-lg transition-colors"
+        >
+          お問い合わせ
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M17 8l4 4m0 0l-4 4m4-4H3"
+            />
+          </svg>
+        </Link>
+      </section>
+
+      {/* Footer */}
+      <footer className="mt-auto border-t border-slate-800">
+        <div className="max-w-4xl mx-auto px-6 py-6">
+          <p className="font-mono text-xs text-slate-600">
+            © {new Date().getFullYear()} NoviqLab
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </footer>
+    </main>
   );
 }
