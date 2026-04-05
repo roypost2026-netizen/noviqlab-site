@@ -22,7 +22,7 @@ export async function POST(request: Request) {
 
   const resend = new Resend(apiKey);
   const { error } = await resend.emails.send({
-    from: "NoviqLab Contact <onboarding@resend.dev>",
+    from: "NoviqLab Contact <noreply@noviqlab.com>",
     to: [contactEmail],
     replyTo: email,
     subject: `[NoviqLab お問い合わせ] ${subject}`,
