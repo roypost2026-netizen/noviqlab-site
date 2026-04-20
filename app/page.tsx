@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ToolCard from "@/components/tools/ToolCard";
 
 const activities = [
   {
@@ -83,6 +84,30 @@ export default function Home() {
             </li>
           ))}
         </ul>
+      </section>
+
+      {/* Divider */}
+      <div className="max-w-4xl mx-auto px-6 w-full">
+        <div className="border-t border-slate-800" />
+      </div>
+
+      {/* Tools */}
+      <section className="max-w-4xl mx-auto px-6 py-16 w-full">
+        <h2 className="font-mono text-xs text-slate-500 tracking-widest uppercase mb-4">
+          Tools
+        </h2>
+        <p className="text-slate-400 text-sm mb-8">
+          ブラウザ内で完結する開発者向けユーティリティ。全て無料公開。
+        </p>
+        <div className="max-w-xs">
+          <ToolCard
+            slug="image-resizer"
+            name="Image Converter"
+            icon="🖼"
+            description="画像のリサイズ・形式変換。Web制作バッチ・容量自動調整対応。"
+            tags={["PNG", "JPEG", "WebP", "AVIF"]}
+          />
+        </div>
       </section>
 
       {/* Divider */}
