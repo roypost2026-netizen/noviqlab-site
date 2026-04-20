@@ -20,8 +20,8 @@ export const BUILTIN_PRESETS: PresetDefinition[] = [
         convertToSrgb: true,
         stripMetadata: true,
         variants: [
-          { id: "v-hero-2x", name: "@2x", width: 1600, height: 900, maxBytes: 256000, suffix: "@2x" },
-          { id: "v-hero-sp", name: "mobile", width: 800, height: 450, maxBytes: 102400, suffix: "" },
+          { id: "v-hero-2x", name: "@2x",   width: 1600, height: 900, minBytes: 204800, maxBytes: 307200, suffix: "@2x" },
+          { id: "v-hero-sp", name: "mobile", width: 800,  height: 450, minBytes: 81920,  maxBytes: 122880, suffix: "" },
         ],
       },
     ],
@@ -39,8 +39,8 @@ export const BUILTIN_PRESETS: PresetDefinition[] = [
         convertToSrgb: true,
         stripMetadata: true,
         variants: [
-          { id: "v-content-2x", name: "@2x", width: 1200, height: 800, maxBytes: 204800, suffix: "@2x" },
-          { id: "v-content-sp", name: "mobile", width: 600, height: 400, maxBytes: 92160, suffix: "" },
+          { id: "v-content-2x", name: "@2x",   width: 1200, height: 800, minBytes: 153600, maxBytes: 204800, suffix: "@2x" },
+          { id: "v-content-sp", name: "mobile", width: 600,  height: 400, minBytes: 61440,  maxBytes: 92160,  suffix: "" },
         ],
       },
     ],
@@ -58,7 +58,7 @@ export const BUILTIN_PRESETS: PresetDefinition[] = [
         convertToSrgb: true,
         stripMetadata: true,
         variants: [
-          { id: "v-profile", name: "main", width: 600, height: 600, maxBytes: 81920, suffix: "" },
+          { id: "v-profile", name: "main", width: 600, height: 600, minBytes: 51200, maxBytes: 81920, suffix: "" },
         ],
       },
     ],
@@ -76,8 +76,8 @@ export const BUILTIN_PRESETS: PresetDefinition[] = [
         convertToSrgb: true,
         stripMetadata: true,
         variants: [
-          { id: "v-blog-2x", name: "@2x", width: 1600, height: 900, maxBytes: 204800, suffix: "@2x" },
-          { id: "v-blog-sp", name: "mobile", width: 800, height: 450, maxBytes: 81920, suffix: "" },
+          { id: "v-blog-2x", name: "@2x",   width: 1600, height: 900, minBytes: 153600, maxBytes: 256000, suffix: "@2x" },
+          { id: "v-blog-sp", name: "mobile", width: 800,  height: 450, minBytes: 61440,  maxBytes: 102400, suffix: "" },
         ],
       },
     ],
@@ -95,8 +95,8 @@ export const BUILTIN_PRESETS: PresetDefinition[] = [
         convertToSrgb: true,
         stripMetadata: true,
         variants: [
-          { id: "v-product-lg", name: "large", width: 1200, height: 1200, suffix: "" },
-          { id: "v-product-sm", name: "thumb", width: 300, height: 300, suffix: "-thumb" },
+          { id: "v-product-lg", name: "large", width: 1200, height: 1200, minBytes: 204800, maxBytes: 409600, suffix: "" },
+          { id: "v-product-sm", name: "thumb", width: 300,  height: 300,  minBytes: 20480,  maxBytes: 51200,  suffix: "-thumb" },
         ],
       },
     ],
@@ -114,7 +114,7 @@ export const BUILTIN_PRESETS: PresetDefinition[] = [
         convertToSrgb: true,
         stripMetadata: true,
         variants: [
-          { id: "v-ogp", name: "main", width: 1200, height: 630, maxBytes: 204800, suffix: "" },
+          { id: "v-ogp", name: "main", width: 1200, height: 630, minBytes: 153600, maxBytes: 256000, suffix: "" },
         ],
       },
     ],

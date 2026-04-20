@@ -297,7 +297,7 @@ export default function ProfileEditor({
                     <span className="text-xs text-white/60 font-mono">
                       {v.name || `バリアント${i + 1}`} —{" "}
                       {v.width && v.height ? `${v.width}×${v.height}px` : "サイズ未設定"}
-                      {v.maxBytes ? ` / ${Math.round(v.maxBytes / 1024)}KB上限` : ""}
+                      {(v.minBytes || v.maxBytes) ? ` / ${v.minBytes ? Math.round(v.minBytes / 1024) : "?"}–${v.maxBytes ? Math.round(v.maxBytes / 1024) : "?"}KB` : ""}
                     </span>
                     <button
                       onClick={() => removeVariant(v.id)}
@@ -347,11 +347,25 @@ export default function ProfileEditor({
                         className="w-full bg-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>
-                    <div className="col-span-2">
-                      <p className="text-xs text-white/30 mb-1">容量上限 KB（空欄 = 上限なし）</p>
+                    <div>
+                      <p className="text-xs text-white/30 mb-1">容量下限 KB（空欄 = なし）</p>
                       <input
                         type="number"
-                        placeholder="250"
+                        placeholder="200"
+                        value={v.minBytes !== undefined ? Math.round(v.minBytes / 1024) : ""}
+                        onChange={(e) =>
+                          updateVariant(v.id, {
+                            minBytes: e.target.value ? +e.target.value * 1024 : undefined,
+                          })
+                        }
+                        className="w-full bg-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-white/30 mb-1">容量上限 KB（空欄 = なし）</p>
+                      <input
+                        type="number"
+                        placeholder="300"
                         value={v.maxBytes !== undefined ? Math.round(v.maxBytes / 1024) : ""}
                         onChange={(e) =>
                           updateVariant(v.id, {
@@ -361,6 +375,9 @@ export default function ProfileEditor({
                         className="w-full bg-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>
+                    {v.minBytes && v.maxBytes && v.minBytes > v.maxBytes && (
+                      <p className="col-span-2 text-xs text-red-400">下限が上限を超えています</p>
+                    )}
                   </div>
                 </div>
               ))}

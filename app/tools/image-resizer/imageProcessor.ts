@@ -1,4 +1,4 @@
-import type { OutputFormat, AspectRatio, CropPosition } from "./types";
+import type { OutputFormat, AspectRatio, CropPosition, Profile, Variant } from "./types";
 
 export async function detectAvifSupport(): Promise<boolean> {
   const canvas = document.createElement("canvas");
@@ -22,12 +22,19 @@ export async function canvasToBlob(
 
 // 8.2 修正済み: && → || で横長・縦長画像も段階縮小が効く
 export function stepDownResize(
-  source: HTMLCanvasElement | HTMLImageElement,
+  source: HTMLCanvasElement | HTMLImageElement | ImageBitmap,
   targetW: number,
   targetH: number
 ): HTMLCanvasElement {
   let canvas = document.createElement("canvas");
-  if (source instanceof HTMLImageElement) {
+
+  if (source instanceof ImageBitmap) {
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return canvas;
+    ctx.drawImage(source, 0, 0);
+  } else if (source instanceof HTMLImageElement) {
     canvas.width = source.width;
     canvas.height = source.height;
     const ctx = canvas.getContext("2d");
@@ -74,50 +81,63 @@ function resolveAspectRatioValue(ar: AspectRatio): number {
   return presetMap[ar.value] ?? 1;
 }
 
-export function cropAndResize(
-  img: HTMLImageElement,
+type CropSource = HTMLImageElement | ImageBitmap;
+
+function getSourceDimensions(source: CropSource): { width: number; height: number } {
+  return { width: source.width, height: source.height };
+}
+
+function drawSourceToCanvas(
+  canvas: HTMLCanvasElement,
+  source: CropSource,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number
+) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.drawImage(source as CanvasImageSource, sx, sy, sw, sh, dx, dy, dw, dh);
+}
+
+export function cropAndResizeSource(
+  source: CropSource,
   aspectRatio: AspectRatio,
   cropPosition: CropPosition,
   targetWidth: number,
   targetHeight: number
 ): HTMLCanvasElement {
   const targetAR = resolveAspectRatioValue(aspectRatio);
-  const srcAR = img.width / img.height;
+  const { width: srcW, height: srcH } = getSourceDimensions(source);
+  const srcAR = srcW / srcH;
 
   let cropX = 0;
   let cropY = 0;
-  let cropW = img.width;
-  let cropH = img.height;
+  let cropW = srcW;
+  let cropH = srcH;
 
   if (srcAR > targetAR) {
-    // 元画像が目標より横長 → 左右を切る（常に中央）
-    cropW = Math.round(img.height * targetAR);
-    cropX = Math.round((img.width - cropW) / 2);
+    cropW = Math.round(srcH * targetAR);
+    cropX = Math.round((srcW - cropW) / 2);
   } else if (srcAR < targetAR) {
-    // 元画像が目標より縦長 → 上下を切る（cropPosition で制御）
-    cropH = Math.round(img.width / targetAR);
-    const excessHeight = img.height - cropH;
+    cropH = Math.round(srcW / targetAR);
+    const excessHeight = srcH - cropH;
     switch (cropPosition) {
-      case "top":
-        cropY = 0;
-        break;
-      case "bottom":
-        cropY = excessHeight;
-        break;
+      case "top":    cropY = 0; break;
+      case "bottom": cropY = excessHeight; break;
       case "center":
-      default:
-        cropY = Math.round(excessHeight / 2);
-        break;
+      default:       cropY = Math.round(excessHeight / 2); break;
     }
   }
 
-  // クロップした領域を step-down で縮小
   const intermediate = document.createElement("canvas");
   intermediate.width = cropW;
   intermediate.height = cropH;
-  const ctx0 = intermediate.getContext("2d");
-  if (!ctx0) return intermediate;
-  ctx0.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  drawSourceToCanvas(intermediate, source, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
   const stepped = stepDownResize(intermediate, targetWidth, targetHeight);
 
@@ -131,13 +151,23 @@ export function cropAndResize(
   return final;
 }
 
+// 後方互換: HTMLImageElement 専用（Day 2 の BatchMode で使用）
+export function cropAndResize(
+  img: HTMLImageElement,
+  aspectRatio: AspectRatio,
+  cropPosition: CropPosition,
+  targetWidth: number,
+  targetHeight: number
+): HTMLCanvasElement {
+  return cropAndResizeSource(img, aspectRatio, cropPosition, targetWidth, targetHeight);
+}
+
 export async function encodeToTargetSize(
   canvas: HTMLCanvasElement,
   format: OutputFormat,
   targetBytes: number,
   maxIterations = 8
 ): Promise<{ blob: Blob; quality: number; attempts: number; warning?: string }> {
-  // PNG は品質パラメータが効かない
   if (format === "image/png") {
     const blob = await canvasToBlob(canvas, format, 1);
     if (!blob) {
@@ -151,15 +181,12 @@ export async function encodeToTargetSize(
   }
 
   let attempts = 0;
-
-  // 初回: 品質85%で試す
   let blob = await canvasToBlob(canvas, format, 0.85);
   attempts++;
   if (blob && blob.size <= targetBytes) {
     return { blob, quality: 0.85, attempts };
   }
 
-  // 二分探索
   let low = 0.1;
   let high = 0.95;
   let best: Blob | null = null;
@@ -182,7 +209,6 @@ export async function encodeToTargetSize(
   }
 
   if (!best) {
-    // 最低品質でも収まらない場合
     const fallback = await canvasToBlob(canvas, format, 0.1);
     attempts++;
     const fb = fallback ?? new Blob();
@@ -195,4 +221,103 @@ export async function encodeToTargetSize(
   }
 
   return { blob: best, quality: bestQuality, attempts };
+}
+
+/** 容量範囲（min〜max）での自動調整（Day 3 追加） */
+export async function encodeToTargetRange(
+  canvas: HTMLCanvasElement,
+  format: OutputFormat,
+  minBytes: number | undefined,
+  maxBytes: number | undefined,
+  maxIterations = 8
+): Promise<{ blob: Blob; quality: number; warning?: string }> {
+  // 両方なし → 品質85%固定
+  if (!minBytes && !maxBytes) {
+    const blob = await canvasToBlob(canvas, format, 0.85);
+    return { blob: blob ?? new Blob(), quality: 0.85 };
+  }
+
+  // maxBytesのみ → 従来の encodeToTargetSize
+  if (!minBytes) {
+    const result = await encodeToTargetSize(canvas, format, maxBytes!, maxIterations);
+    return { blob: result.blob, quality: result.quality, warning: result.warning };
+  }
+
+  // minBytesのみ → 品質85%で試し、下回るなら90/95/1.0 と上げる
+  if (!maxBytes) {
+    for (const q of [0.85, 0.90, 0.95, 1.0]) {
+      const blob = await canvasToBlob(canvas, format, q);
+      if (!blob) continue;
+      if (blob.size >= minBytes) return { blob, quality: q };
+    }
+    const blob = await canvasToBlob(canvas, format, 1.0);
+    const fb = blob ?? new Blob();
+    return {
+      blob: fb,
+      quality: 1.0,
+      warning: `容量下限（${Math.round(minBytes / 1024)}KB）を確保できませんでした（実容量: ${Math.round(fb.size / 1024)}KB）`,
+    };
+  }
+
+  // 両方あり → maxBytes以下で最高品質を探し、minBytes 下回り時は警告
+  const result = await encodeToTargetSize(canvas, format, maxBytes, maxIterations);
+  if (result.blob.size < minBytes) {
+    return {
+      blob: result.blob,
+      quality: result.quality,
+      warning: result.warning
+        ?? `容量が下限（${Math.round(minBytes / 1024)}KB）を下回っています（実容量: ${Math.round(result.blob.size / 1024)}KB）`,
+    };
+  }
+  return { blob: result.blob, quality: result.quality, warning: result.warning };
+}
+
+/** sRGB 正規化付き画像ロード（D-07）。非対応時は null を返す */
+export async function loadImageBitmap(file: File): Promise<ImageBitmap | null> {
+  if (typeof createImageBitmap === "undefined") return null;
+  try {
+    return await createImageBitmap(file, {
+      colorSpaceConversion: "default",
+      imageOrientation: "from-image",
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** HTMLImageElement フォールバック */
+function loadImageElement(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("画像の読み込みに失敗しました")); };
+    img.src = url;
+  });
+}
+
+/**
+ * バッチモード専用の画像処理関数（Day 3）。
+ * sRGB変換 → クロップ → リサイズ → 容量範囲最適化を一括実行。
+ */
+export async function processBatchImage(
+  file: File,
+  profile: Profile,
+  variant: Variant
+): Promise<{ blob: Blob; warning?: string }> {
+  // 1. 画像読み込み（createImageBitmap 優先、fallback HTMLImageElement）
+  const bitmap = await loadImageBitmap(file);
+  let canvas: HTMLCanvasElement;
+
+  if (bitmap) {
+    canvas = cropAndResizeSource(bitmap, profile.aspectRatio, profile.cropPosition, variant.width, variant.height);
+    bitmap.close();
+  } else {
+    const img = await loadImageElement(file);
+    canvas = cropAndResizeSource(img, profile.aspectRatio, profile.cropPosition, variant.width, variant.height);
+  }
+
+  // 2. 容量範囲最適化
+  const result = await encodeToTargetRange(canvas, profile.format, variant.minBytes, variant.maxBytes);
+  return { blob: result.blob, warning: result.warning };
 }

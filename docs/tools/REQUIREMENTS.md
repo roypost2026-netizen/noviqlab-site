@@ -1,12 +1,48 @@
-# NoviqLab Tools 要件定義書 v2.0
+# NoviqLab Tools 要件定義書 v3.0
 
 **作成日**: 2026-04-20
 **改訂履歴**:
 - v1.0 (2026-04-20): 初版（MVP機能のみ）
 - v2.0 (2026-04-20): Web制作バッチモード・容量目標自動調整を追加
+- **v3.0 (2026-04-20): Day 1・2実装反映、複数画像対応（Day 3）を追加、実依頼ケース分析を明確化**
 
-**対象**: noviqlab.com への Tools セクション追加 & 第1弾として画像変換ツール実装
+**対象**: noviqlab.com への Tools セクション追加 & 画像変換ツール実装
 **配置先**: `E:\app\noviqlab\noviqlab-site\`
+
+---
+
+## 0. 実装進捗（2026-04-20 時点）
+
+### ✅ Day 1（完了）
+
+- Tools インフラ整備（`/tools`、`/tools/image-resizer`）
+- トップページにToolsセクション追加
+- シンプルモード実装（Geminiコード由来のバグ8項目全修正）
+- 12パターン統合テスト：実画像12枚で動作確認済み
+- Gitコミット: `5843890`
+
+### ✅ Day 2（完了）
+
+- バッチモード基盤実装
+- 共通ロジック抽出（`imageProcessor.ts`）
+- プロファイル編集モーダル
+- 組み込みプリセット6種
+- 容量目標自動調整（二分探索、実測で「上限ギリギリ最適化」を確認）
+- JSON import/export + localStorage
+- Gitコミット: `3495097`
+
+### ⏳ Day 3（未実装、本要件追加分）
+
+- **1プロファイルに複数画像割り当て機能**
+- **画像ごとのサフィックス手動入力**（a/b/c/d 展開用）
+- 容量範囲指定（minBytes / maxBytes）
+- sRGB変換（createImageBitmap）
+
+### 📋 Phase 2（将来）
+
+- EXIF可視化・剥がし
+- Before/Afterスライダー比較
+- 顔検出自動クロップ（profile画像用）
 
 ---
 
@@ -21,16 +57,16 @@
 
 ### 1.2 制約
 
-- **静的配信前提**(Vercel Hobby / Next.js App Router)
+- **静的配信前提**（Vercel Hobby / Next.js App Router）
 - サーバーサイド処理なし、全てブラウザ内完結
 - 非商用・無料公開
 
 ### 1.3 スコープ
 
-- **Phase 1（本要件）**:
+- **Phase 1（本要件、Day 1〜3完了時点）**:
   - Tools インフラ整備
-  - 画像変換ツール v1（MVP機能 + Web制作バッチモード + 容量目標自動調整）
-- **Phase 2（将来）**: EXIF可視化・Before/Afterスライダー比較
+  - 画像変換ツール v1（シンプル + Web制作バッチ + 複数画像対応 + 容量自動調整）
+- **Phase 2（将来）**: EXIF可視化・Before/Afterスライダー・顔検出クロップ
 - **Phase 3（将来）**: 2本目以降のツール追加
 
 ### 1.4 想定ユースケース
@@ -39,428 +75,601 @@
 |---|---|
 | ブログ記事の画像1枚をサッと変換 | シンプルモード |
 | SNS投稿用に画像を一括リサイズ | シンプルモード（プリセット利用） |
-| **Web制作納品: 1枚から複数サイズ（PC@2x / SP / etc）を一括生成** | **バッチモード** |
+| **Web制作納品: 1案件で複数のヒーロー案(a/b/c/d) × 複数サイズ一括生成** | **バッチモード + 複数画像対応** |
 | **容量制約あり（「250KB以下で」等）の最適化** | **バッチモード + 容量自動調整** |
 
 ---
 
-## 2. 情報設計
+## 2. 実依頼ケース分析（Day 3 設計の根拠）
 
-### 2.1 サイトマップ
+### 2.1 依頼仕様
+
+軽トラ運送サービスのWeb制作で、以下の画像納品を要求された：
+
+**共通方針**:
+- 形式: JPG
+- 品質: 80〜85%
+- カラープロファイル: sRGB
+- メタデータ削除（EXIF等）
+
+**画像種別と仕様**:
+
+| 種別 | 比率 | PC用 (@2x) | スマホ用 |
+|---|---|---|---|
+| hero（ヒーロー） | 16:9 | 1600×900px, 200-300KB | 800×450px, 80-120KB |
+| truck（荷台） | 3:2 | 1200×800px, 150-200KB | 600×400px, 60-90KB |
+| tools（装備品） | 3:2 | 1200×800px, 150-200KB | 600×400px, 60-90KB |
+| profile（顔写真） | 1:1 | 600×600px, 50-80KB（1サイズのみ） | - |
+
+**ファイル名ルール**:
+
+```
+hero-a.jpg / hero-a@2x.jpg   ← a案
+hero-b.jpg / hero-b@2x.jpg   ← b案
+hero-c.jpg / hero-c@2x.jpg
+hero-d.jpg / hero-d@2x.jpg
+（truck, toolsも同様）
+profile.jpg                  ← 1枚のみ
+```
+
+### 2.2 元画像の命名規則
+
+依頼元から提供された元画像（12枚）の命名パターン：
+
+```
+[アスペクト比タグ]ー[コンセプト].png
+
+例:
+横ープロフェッショナル・信頼感.png    (16:9)  → hero-a 候補
+横ー職人の誠実さ・広告感ゼロ.png      (16:9)  → hero-b 候補
+横ー職人の手仕事・和の素材感.png      (16:9)  → hero-c 候補
+横ー親しみ＋引き締め・CTA強め.png     (16:9)  → hero-d 候補
+
+後ープロフェッショナル・信頼感.png    (3:2)   → truck-a 候補
+後ー職人の誠実さ・広告感ゼロ.png      (3:2)   → truck-b 候補
+...
+
+袋ープロフェッショナル・信頼感.png    (3:2)   → tools-a 候補
+袋ー職人の誠実さ・広告感ゼロ.png      (3:2)   → tools-b 候補
+...
+```
+
+**重要な意味**:
+- 「横 / 後 / 袋」はアスペクト比タグ（**物理情報**）
+- 「プロフェッショナル / 誠実さ / 和の素材感 / 親しみ」は**コンセプトバリエーション**
+- **どのコンセプトがa/b/c/dになるかはユーザー（Roy）が判断**
+
+### 2.3 Day 3 設計への示唆
+
+現状（Day 2 完了時点）では**1プロファイル = 1画像 = 1ファイル名**の制約があるため、実依頼を処理しようとすると：
+
+- hero プロファイルを4つ（hero-a, hero-b, hero-c, hero-d）作成する必要
+- 合計13プロファイル管理が必要 → **面倒、非現実的**
+
+**Day 3 で追加する機能**:
+1. **1プロファイルに複数画像を割り当て可能**に
+2. **画像ごとのサフィックス手動入力**（`-a`, `-b`, `-c`, `-d` など自由）
+3. **自動ファイル名生成**: `{baseFilename}{imageSuffix}{variantSuffix}.{ext}` = `hero-a@2x.jpg`
+
+これにより、hero プロファイル1つに4画像を割り当てるだけで8ファイル一括生成できる。
+
+### 2.4 運用フロー（Day 3 完成後）
+
+```
+1. JSON 構成ファイル読み込み（1回だけ作れば使い回し可能）
+   → hero / truck / tools / profile の4プロファイル復元
+
+2. 各プロファイルに画像を割り当て
+   hero  ← 横ー*.png を4枚ドロップ、a/b/c/d と suffix 入力
+   truck ← 後ー*.png を4枚ドロップ、a/b/c/d と suffix 入力
+   tools ← 袋ー*.png を4枚ドロップ、a/b/c/d と suffix 入力
+   profile ← 田村さん写真を1枚ドロップ
+
+3. 「全て生成」クリック
+   → 合計 8+8+8+1 = 25ファイル生成
+     （依頼仕様の13ファイルを含む完全セット）
+
+4. ZIP でDL → 納品
+```
+
+---
+
+## 3. 情報設計
+
+### 3.1 サイトマップ
 
 ```
 noviqlab.com/
-├── /                    ← トップ（Toolsセクション追加）
+├── /                    ← トップ（Toolsセクション追加済み）
 ├── /contact             ← 既存
-└── /tools               ← NEW: ツール一覧
-    └── /image-resizer   ← NEW: 画像変換ツール（シンプル/バッチ両モード）
+└── /tools               ← ツール一覧（Day 1実装済み）
+    └── /image-resizer   ← 画像変換ツール（Day 1-3で完成予定）
 ```
 
-### 2.2 URL設計ルール
+### 3.2 URL設計ルール
 
 - `/tools/{kebab-case-slug}` 形式で統一
 - 将来 `/tools/exif-cleaner`, `/tools/ogp-generator` など追加可能
-- 英語slug（多言語展開やSEO配慮）
 
-### 2.3 SEO方針
+### 3.3 SEO方針
 
 - `/tools` と `/tools/image-resizer`: `index, follow`
-- メタタグ最低限（title, description, OGP）
-- 将来不要なら個別に `noindex` 切替可能な設計に
+- メタタグは `layout.tsx` で設定（`"use client"` 制約のため page.tsx から分離済み）
 
 ---
 
-## 3. 画面設計
+## 4. 画面設計
 
-### 3.1 トップページ改修（`app/page.tsx`）
+### 4.1 トップページ（Day 1実装済み）
 
-**変更箇所**: 「主な活動」セクションの下に「Tools」セクションを追加
+既存「主な活動」の下に「Tools」セクション追加完了。
+`ToolCard` コンポーネントを使用。
 
-```
-┌─────────────────────────────────┐
-│ NoviqLab              [Contact] │  ← 既存ヘッダー
-├─────────────────────────────────┤
-│                                 │
-│ AI × DX × システム開発          │
-│ NoviqLabは...                   │
-│                                 │
-│ ## 主な活動                     │  ← 既存
-│ ...                             │
-│                                 │
-│ ## Tools                        │  ← NEW
-│ ブラウザ内で完結する開発者向け  │
-│ ユーティリティ。全て無料公開。  │
-│                                 │
-│ ┌─────────────────────────┐     │
-│ │ 🖼  Image Converter      │     │
-│ │ 画像のリサイズ・形式変換 │     │
-│ │ Web制作向けバッチ処理対応│     │
-│ └─────────────────────────┘     │
-│                                 │
-│ [お問い合わせ]                  │  ← 既存
-│                                 │
-└─────────────────────────────────┘
-```
+### 4.2 `/tools` 一覧ページ（Day 1実装済み）
 
-### 3.2 `/tools` 一覧ページ（`app/tools/page.tsx`）
+パンくず + Toolsリード文 + ツールカードリスト。
 
-```
-┌─────────────────────────────────┐
-│ NoviqLab / Tools     [Contact]  │
-├─────────────────────────────────┤
-│                                 │
-│ # Tools                         │
-│ ブラウザ内で完結する開発者向け  │
-│ ユーティリティツール集。        │
-│                                 │
-│ ┌───────────────────────────┐   │
-│ │ 🖼  Image Converter        │   │
-│ │                           │   │
-│ │ 画像のリサイズ・形式変換  │   │
-│ │ Web制作バッチ・容量自動調整│   │
-│ │                           │   │
-│ │ PNG · JPEG · WebP · AVIF  │   │
-│ │                  [開く →] │   │
-│ └───────────────────────────┘   │
-│                                 │
-│ [← NoviqLab トップへ戻る]       │
-└─────────────────────────────────┘
-```
+### 4.3 `/tools/image-resizer` ツール本体
 
-### 3.3 `/tools/image-resizer` ツール本体
+#### 4.3.1 モード切替UI（Day 1実装済み）
 
-#### 3.3.1 モード切替UI
+- 「シンプル」タブ + 「Web制作バッチ」タブ
+- localStorage でモード記憶（Day 2実装済み）
+- SSR対応（hydration前は非表示）
 
-ツールページ上部に**モード切替タブ**を配置。
+#### 4.3.2 シンプルモード（Day 1実装済み、Day 2でリファクタ済み）
+
+- 汎用リサイズ・形式変換
+- 画質スライダー、リサイズ、調整（明るさ・コントラスト・彩度）
+- SNSプリセット、ZIP一括DL
+
+#### 4.3.3 Web制作バッチモード（Day 2実装済み、Day 3で拡張）
+
+**現状（Day 2完了時点）**:
+- プロファイル作成・編集・削除
+- 組み込みプリセット6種
+- 容量目標自動調整（動作確認済み、上限ギリギリの最適化を実現）
+- JSON import/export + localStorage
+- 1プロファイル = 1画像 = 複数バリアント
+
+**Day 3 で追加する画像割り当てUI**:
 
 ```
-┌─────────────────────────────────────┐
-│ NoviqLab / Tools / Image Converter  │
-├─────────────────────────────────────┤
-│                                     │
-│  [ シンプル ] [ Web制作バッチ ]     │  ← タブ切替
-│                                     │
+┌─ hero プロファイル ──────────[編集][削除]──┐
+│ 16:9 · JPEG                                  │
+│ hero-*@2x.jpg — 1600×900px / 200-300KB      │
+│ hero-*.jpg   —  800×450px /  80-120KB       │
+│                                              │
+│ 画像を割り当てて生成:                        │
+│ ┌──────────────────────────────────────┐    │
+│ │ [画像を一括ドロップ or クリック選択] │    │
+│ └──────────────────────────────────────┘    │
+│                                              │
+│ 割当済み（4枚）:                             │
+│ ┌─────────────────────────────────────┐     │
+│ │ [thumb] 横ープロフェッショナル.png   │     │
+│ │ suffix: [-a          ]   [削除]      │     │
+│ ├─────────────────────────────────────┤     │
+│ │ [thumb] 横ー職人の誠実さ.png         │     │
+│ │ suffix: [-b          ]   [削除]      │     │
+│ ├─────────────────────────────────────┤     │
+│ │ [thumb] 横ー職人の手仕事.png         │     │
+│ │ suffix: [-c          ]   [削除]      │     │
+│ ├─────────────────────────────────────┤     │
+│ │ [thumb] 横ー親しみ＋引き締め.png     │     │
+│ │ suffix: [-d          ]   [削除]      │     │
+│ └─────────────────────────────────────┘     │
+│                                              │
+│ 生成予定: 8ファイル                          │
+│ → hero-a.jpg (目標 80-120KB)                 │
+│ → hero-a@2x.jpg (目標 200-300KB)             │
+│ → hero-b.jpg (目標 80-120KB)                 │
+│ → hero-b@2x.jpg (目標 200-300KB)             │
+│ → hero-c.jpg, hero-c@2x.jpg                  │
+│ → hero-d.jpg, hero-d@2x.jpg                  │
+└──────────────────────────────────────────────┘
 ```
 
-#### 3.3.2 シンプルモード
+**サフィックスの扱い**:
+- 画像追加時は**デフォルトで空**
+- ユーザーが手動入力（`-a`, `-b`, `-c`, `-d` でも `-pro`, `-v1` でも自由）
+- **同じsuffixが複数あるとバリデーションエラー**（ファイル名衝突回避）
+- 1枚だけ割り当て時は空文字でもOK（profile.jpg ケース）
 
-従来通り。Geminiコード踏襲 + バグ修正版。
+#### 4.3.4 プロファイル編集ダイアログ（Day 2実装済み、Day 3で一部拡張）
 
-```
-┌─ サイドバー ───┬─ メインエリア ──────┐
-│                │                      │
-│ 出力形式       │ [ドロップゾーン]     │
-│ [JPEG][PNG]    │                      │
-│ [WebP][AVIF]   │                      │
-│                │ ファイルリスト       │
-│ 画質: ━━○━━ 85│ ┌──────────────┐    │
-│                │ │ img1.png     │    │
-│ 背景色: ■      │ │ → 変換後サイズ│    │
-│                │ └──────────────┘    │
-│ リサイズ [ON]  │                      │
-│ 幅: 800        │ [一括変換]           │
-│ 高さ: auto     │ [ZIPでDL]            │
-│ □ アスペクト維持│                      │
-│                │                      │
-│ プリセット     │                      │
-│ · X(Twitter)   │                      │
-│ · Instagram    │                      │
-│ · OGP          │                      │
-│                │                      │
-│ 調整           │                      │
-│ 明るさ: ━○━    │                      │
-│ コントラスト   │                      │
-│ 彩度           │                      │
-└────────────────┴──────────────────────┘
-```
+**Day 3 追加項目**:
+- バリアントに `minBytes`（容量下限）入力欄追加
+- 既存の `maxBytes` と合わせて「200-300KB」の範囲指定が可能に
 
-#### 3.3.3 Web制作バッチモード
+#### 4.3.5 組み込みプリセット（Day 2実装済み、Day 3で仕様調整）
 
-**コンセプト**: 1枚の元画像から、複数サイズ・複数解像度のバリアントを一括生成。プロファイル（出力仕様セット）を定義してD&Dで一撃処理。
+**プリセットのベースファイル名変更**:
 
-```
-┌─────────────────────────────────────────────────┐
-│  [ シンプル ] [ ▶ Web制作バッチ ]               │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│ ## バッチプロファイル                           │
-│                                                 │
-│ ┌─ hero (横画像) ──────────────[ 編集 ][削除]┐ │
-│ │ 比率: 16:9  出力: JPEG                     │ │
-│ │ ├─ @2x: 1600×900px / 最大250KB             │ │
-│ │ └─ mobile: 800×450px / 最大100KB           │ │
-│ │ ファイル名: hero-a.jpg, hero-a@2x.jpg      │ │
-│ └────────────────────────────────────────────┘ │
-│                                                 │
-│ ┌─ truck (3:2) ────────────────[ 編集 ][削除]┐ │
-│ │ 比率: 3:2  出力: JPEG                       │ │
-│ │ ├─ @2x: 1200×800px / 最大200KB             │ │
-│ │ └─ mobile: 600×400px / 最大90KB            │ │
-│ └────────────────────────────────────────────┘ │
-│                                                 │
-│ ┌─ profile (1:1) ──────────────[ 編集 ][削除]┐ │
-│ │ 比率: 1:1  出力: JPEG                       │ │
-│ │ └─ 600×600px / 最大80KB                    │ │
-│ └────────────────────────────────────────────┘ │
-│                                                 │
-│ [ + プロファイル追加 ] [ プリセット読み込み ▼ ] │
-│ [ プロファイルをJSONで保存 ][ JSONから読み込み ]│
-│                                                 │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│ ## 画像を割り当てて生成                         │
-│                                                 │
-│ ┌─ hero-a ─────────────────┐                  │
-│ │ [画像をドロップ]          │                  │
-│ │ → hero-a.jpg             │                  │
-│ │ → hero-a@2x.jpg          │                  │
-│ └──────────────────────────┘                  │
-│                                                 │
-│ ┌─ hero-b ─────────────────┐                  │
-│ │ [ img_hero_b.png ]        │                  │
-│ │ → [中央クロップ ▼]        │                  │
-│ │ → hero-b.jpg (85KB)      │                  │
-│ │ → hero-b@2x.jpg (220KB)  │                  │
-│ └──────────────────────────┘                  │
-│                                                 │
-│ [ 全て生成 ] [ ZIPでDL ]                        │
-│                                                 │
-└─────────────────────────────────────────────────┘
-```
-
-#### 3.3.4 プロファイル編集ダイアログ
-
-```
-┌─ プロファイル編集 ──────────────────┐
-│                                     │
-│ プロファイル名: hero                │
-│ ベースファイル名: hero-a            │
-│                                     │
-│ 比率: [ 16:9 ▼ ] (16:9 / 3:2 / 4:3  │
-│                   / 1:1 / カスタム) │
-│                                     │
-│ クロップ位置: ○中央 ○上 ○下        │
-│                                     │
-│ 出力形式: [JPEG ▼]                  │
-│ カラープロファイル: ■ sRGBに変換    │
-│ メタデータ: ■ 削除（EXIF等）        │
-│                                     │
-│ バリアント:                         │
-│ ┌──────────────────────────────┐   │
-│ │ ▼ @2x                         │   │
-│ │ サイズ: 1600 × 900 px         │   │
-│ │ 容量上限: 250 KB              │   │
-│ │ サフィックス: @2x             │   │
-│ │ [ 削除 ]                      │   │
-│ └──────────────────────────────┘   │
-│ ┌──────────────────────────────┐   │
-│ │ ▼ mobile                      │   │
-│ │ サイズ: 800 × 450 px          │   │
-│ │ 容量上限: 100 KB              │   │
-│ │ サフィックス: (なし)          │   │
-│ │ [ 削除 ]                      │   │
-│ └──────────────────────────────┘   │
-│                                     │
-│ [ + バリアント追加 ]                │
-│                                     │
-│            [ キャンセル ][ 保存 ]   │
-└─────────────────────────────────────┘
-```
-
-#### 3.3.5 組み込みプリセット
-
-ユーザーが選ぶだけで一般的な構成がセットされるプリセットを提供：
+Day 2 現状のプリセットは `baseFilename: "hero"` などだが、Day 3 では:
+- `hero` プロファイルのデフォルト baseFilename = `hero`（変更なし）
+- 画像割当時に**suffix を追加することで `hero-a.jpg` に展開**
+- サフィックス未入力なら `hero.jpg`（1枚運用時の互換性維持）
 
 | プリセット名 | 内容 |
 |---|---|
-| **Web制作・ヒーロー用** | 16:9 / @2x 1600×900 250KB / mobile 800×450 100KB |
-| **Web制作・コンテンツ用** | 3:2 / @2x 1200×800 200KB / mobile 600×400 90KB |
-| **Web制作・プロフィール** | 1:1 / 600×600 80KB |
-| **ブログ記事用** | @2x 1600×900 WebP 200KB / mobile 800×450 80KB |
-| **EC商品写真** | 1:1 / 大 1200×1200 / サムネ 300×300 |
-| **OGP / SNS** | 1200×630 JPEG 200KB |
+| Web制作・ヒーロー用 | 16:9 / @2x 1600×900 200-300KB / mobile 800×450 80-120KB |
+| Web制作・コンテンツ用 | 3:2 / @2x 1200×800 150-200KB / mobile 600×400 60-90KB |
+| Web制作・プロフィール | 1:1 / 600×600 50-80KB |
+| ブログ記事用 | WebP / @2x 1600×900 200KB / mobile 800×450 80KB |
+| EC商品写真 | 1:1 / 大 1200×1200 / サムネ 300×300 |
+| OGP / SNS | 1200×630 JPEG 200KB |
+
+**Day 3 での変更**: 各プリセットに `minBytes` を追加（例: heroの@2xは200KB下限）
 
 ---
 
-## 4. デザインガイド
+## 5. デザインガイド（Day 1-2で確立、Day 3も踏襲）
 
-### 4.1 方針
+### 5.1 カラーパレット
 
-既存noviqlab.comの**ミニマル・タイポグラフィ重視**のトーンを踏襲。
-
-### 4.2 カラーパレット
-
-| 用途 | カラー | 備考 |
-|---|---|---|
-| 背景（ダーク） | `#0b1120` | Gemini指定継続 |
-| 背景（カード） | `white/5` | |
-| 背景（ホバー） | `white/10` | |
-| テキスト（主） | `white` | |
-| テキスト（副） | `white/50` | |
-| テキスト（薄） | `white/30` | |
-| アクセント | `sky-400` / `sky-500` | |
-| 境界線 | `white/10` | |
-| 成功 | `sky-400` | |
-| エラー | `red-400` | |
-| 警告 | `amber-400` | |
-| アクティブタブ | `sky-500` 下線 | モード切替用 |
-
-### 4.3 タイポグラフィ
-
-- フォント: システムフォント（既存踏襲）
-- コード・数値: `font-mono`
-- 見出し: `font-semibold` / `font-bold`
-- セクションラベル: `text-xs uppercase tracking-widest`
-
-### 4.4 コンポーネント統一ルール
-
-**カード**: `bg-white/5 rounded-xl p-4`、ホバー `hover:bg-white/10 transition-all`
-
-**ボタン（primary）**: `bg-sky-500 hover:bg-sky-400 text-white rounded-xl font-semibold`
-
-**ボタン（secondary）**: `bg-white/10 hover:bg-white/20 text-white rounded-xl`
-
-**モードタブ**: インラインボタン、アクティブ時に `border-b-2 border-sky-400 text-white`、非アクティブ `text-white/40`
-
-**モーダル（プロファイル編集）**: `bg-[#0b1120] border border-white/10 rounded-2xl p-6 max-w-lg`
-
-### 4.5 レスポンシブ
-
-| ブレークポイント | 対応 |
+| 用途 | カラー |
 |---|---|
-| モバイル（~768px） | 1カラム、サイドバーは上部折り畳み、バッチモードは縦積み |
-| タブレット（768-1024px） | ツール一覧2カラム |
-| デスクトップ（1024px~） | シンプルモード `[300px_1fr]`、バッチモードは1カラム幅広め |
+| 背景 | `#0b1120` |
+| カード | `bg-white/5` |
+| カードホバー | `bg-white/10` |
+| アクセント | `sky-400` / `sky-500` |
+| エラー | `red-400` |
+| 警告 | `amber-400` |
 
-### 4.6 アクセシビリティ
+### 5.2 コンポーネント統一ルール
 
-- alt属性は意味のある場合のみ
-- キーボード操作可能（tab順、Enter/Space）
-- モーダルは Esc で閉じる
-- カラーコントラスト WCAG AA 準拠
+- カード: `bg-white/5 rounded-xl p-4`
+- プライマリボタン: `bg-sky-500 hover:bg-sky-400 text-white rounded-xl`
+- セクションラベル: `text-xs uppercase tracking-widest text-white/40`
+
+### 5.3 Day 3 新規UI要素
+
+- **画像カード（割当済み）**: サムネ + ファイル名 + サフィックス入力 + 削除ボタン
+- **生成予定リスト**: `text-xs text-white/50` でファイル名を一覧表示
+- **サフィックス衝突警告**: 入力欄下に `text-xs text-red-400` で表示
 
 ---
 
-## 5. 機能要件
+## 6. 機能要件
 
-### 5.1 /tools 一覧ページ
+### 6.1 シンプルモード機能（Day 1実装済み）
 
-- ツールカードのリスト表示
-- 各カードから個別ツールへ遷移
-- 静的生成（SSG）
+S-01〜S-16（v2.0と同じ、変更なし）
 
-### 5.2 /tools/image-resizer 共通機能
+### 6.2 Web制作バッチモード基本機能（Day 2実装済み）
 
-| No | 機能 | 優先度 |
-|---|---|---|
-| C-01 | モード切替タブ（シンプル / バッチ） | 必須 |
-| C-02 | 選択中モードの `localStorage` 記憶 | 推奨 |
-| C-03 | パンくずナビゲーション | 必須 |
-| C-04 | AVIF対応自動検出・UI除外 | 必須 |
+B-01〜B-17（v2.0と同じ、変更なし）
 
-### 5.3 シンプルモード機能
+### 6.3 Day 3 追加機能
 
 | No | 機能 | 優先度 |
 |---|---|---|
-| S-01 | 画像ファイルのドラッグ&ドロップ | 必須 |
-| S-02 | クリックでファイル選択 | 必須 |
-| S-03 | 複数ファイル同時処理 | 必須 |
-| S-04 | 出力形式選択（JPEG/PNG/WebP/AVIF） | 必須 |
-| S-05 | 画質スライダー（1-100） | 必須 |
-| S-06 | リサイズ（幅/高さ数値指定） | 必須 |
-| S-07 | アスペクト比維持トグル | 必須 |
-| S-08 | SNSプリセット（X/Instagram/OGP/FHD/4K） | 必須 |
-| S-09 | 明るさ・コントラスト・彩度調整 | 必須 |
-| S-10 | 透過PNG→JPEG時の背景色指定 | 必須 |
-| S-11 | Before/Afterサムネイル表示 | 必須 |
-| S-12 | プレビュー拡大モーダル | 必須 |
-| S-13 | 個別ダウンロード | 必須 |
-| S-14 | ZIP一括ダウンロード | 必須 |
-| S-15 | step-down 段階縮小 | 必須 |
-| S-16 | EXIF/メタデータ自動削除（Canvas再描画により標準） | 必須 |
+| D-01 | **1プロファイルに複数画像割り当て** | 必須 |
+| D-02 | **画像ごとのサフィックス手動入力** | 必須 |
+| D-03 | **サフィックス重複バリデーション** | 必須 |
+| D-04 | **元ファイル名表示**（どの画像がどのsuffixか分かる） | 必須 |
+| D-05 | 容量下限指定（minBytes） | 必須 |
+| D-06 | 容量範囲（minBytes〜maxBytes）での自動調整 | 必須 |
+| D-07 | sRGB変換（createImageBitmap使用） | 推奨 |
+| D-08 | 画像ごとのサムネイルプレビュー | 必須 |
+| D-09 | 画像の並べ替え（ドラッグで順序変更） | 任意 |
+| D-10 | 生成予定ファイル名プレビュー（実時間更新） | 必須 |
 
-### 5.4 Web制作バッチモード機能
-
-| No | 機能 | 優先度 |
-|---|---|---|
-| B-01 | プロファイル作成・編集・削除 | 必須 |
-| B-02 | プロファイルごとの比率指定（16:9 / 3:2 / 4:3 / 1:1 / カスタム） | 必須 |
-| B-03 | プロファイルごとのベースファイル名指定 | 必須 |
-| B-04 | プロファイル内に複数バリアント定義可能 | 必須 |
-| B-05 | バリアントごとのサイズ・容量上限・サフィックス指定 | 必須 |
-| B-06 | **容量目標値に基づく品質自動調整（二分探索）** | 必須 |
-| B-07 | クロップ位置指定（中央 / 上 / 下） | 必須 |
-| B-08 | 組み込みプリセット（Web制作ヒーロー、プロフィール等） | 必須 |
-| B-09 | プロファイル構成のJSONエクスポート | 必須 |
-| B-10 | プロファイル構成のJSONインポート | 必須 |
-| B-11 | プロファイル構成の `localStorage` 自動保存 | 推奨 |
-| B-12 | プロファイルへの画像割り当てUI（D&D or 選択） | 必須 |
-| B-13 | 一括生成（全プロファイル × 全バリアント） | 必須 |
-| B-14 | 生成結果プレビュー（サムネ + 実容量表示） | 必須 |
-| B-15 | ZIP一括DL（ファイル名ルール自動適用） | 必須 |
-| B-16 | 各プロファイル個別のZIP DL | 推奨 |
-| B-17 | 生成処理の進捗表示 | 必須 |
-
-### 5.5 容量目標自動調整アルゴリズム（B-06詳細）
+### 6.4 ファイル名生成ロジック（Day 3 改訂版）
 
 ```typescript
-async function encodeToTargetSize(
+function generateFilename(
+  baseFilename: string,      // "hero"
+  imageSuffix: string,       // "-a" (画像ごと、空でもOK)
+  variantSuffix: string,     // "@2x" (バリアントごと、空でもOK)
+  ext: string                // "jpg"
+): string {
+  return `${baseFilename}${imageSuffix}${variantSuffix}.${ext}`;
+}
+
+// 例:
+// baseFilename="hero", imageSuffix="-a", variantSuffix="@2x" → "hero-a@2x.jpg"
+// baseFilename="hero", imageSuffix="-a", variantSuffix=""    → "hero-a.jpg"
+// baseFilename="profile", imageSuffix="", variantSuffix=""   → "profile.jpg"
+```
+
+### 6.5 容量範囲自動調整アルゴリズム（Day 3 改訂版）
+
+```typescript
+async function encodeToTargetRange(
   canvas: HTMLCanvasElement,
-  format: string,
-  targetBytes: number,
+  format: OutputFormat,
+  minBytes: number | undefined,
+  maxBytes: number | undefined,
   maxIterations = 8
-): Promise<{ blob: Blob; quality: number }> {
-  let low = 0.1;
-  let high = 0.95;
-  let best: Blob | null = null;
-  let bestQuality = 0.85;
+): Promise<{ blob: Blob; quality: number; warning?: string }> {
+  // minBytes/maxBytes 両方あり: 範囲内で最高品質
+  // maxBytesのみ: 従来通り、上限以下で最高品質
+  // minBytesのみ: 下限以上でできるだけ低品質（容量節約）
+  // 両方なし: 品質85%固定
 
-  // 初回: 品質85%で試す（多くのケースで一発で収まる）
-  let blob = await canvasToBlob(canvas, format, 0.85);
-  if (blob && blob.size <= targetBytes) {
-    return { blob, quality: 0.85 };
+  if (!minBytes && !maxBytes) {
+    return encodeAtQuality(canvas, format, 0.85);
   }
 
-  // 二分探索で容量内に収める最高品質を探す
-  for (let i = 0; i < maxIterations; i++) {
-    const mid = (low + high) / 2;
-    blob = await canvasToBlob(canvas, format, mid);
-    if (!blob) break;
-
-    if (blob.size <= targetBytes) {
-      best = blob;
-      bestQuality = mid;
-      low = mid;
-    } else {
-      high = mid;
-    }
-    if (high - low < 0.02) break; // 収束判定
+  if (!minBytes) {
+    // 従来のmaxBytesのみアルゴリズム
+    return encodeToTargetSize(canvas, format, maxBytes!, maxIterations);
   }
 
-  if (!best) {
-    // どうしても入らなければ最低品質で返して警告
-    return { blob: blob!, quality: low };
+  // 範囲指定の場合: 二分探索で maxBytes 以下の最大品質を探し、
+  // それが minBytes 以上なら成功、未満なら「軽量すぎ」の警告
+  const result = await encodeToTargetSize(canvas, format, maxBytes!, maxIterations);
+  if (result.blob.size < minBytes) {
+    return {
+      ...result,
+      warning: `容量が下限(${minBytes}B)を下回っています (${result.blob.size}B)`,
+    };
   }
-  return { blob: best, quality: bestQuality };
+  return result;
 }
 ```
 
-**注意事項**:
+### 6.6 バリデーション要件
 
-- PNGは品質パラメータが効かない → 容量指定時は自動でJPEG/WebP推奨の警告を出す
-- 目標容量に収まらなかった場合は **警告アイコン + 実容量表示**
-- 最低品質（0.1）でも超過する場合は**リサイズ縮小を提案**
+Day 3 で追加するバリデーション：
 
-### 5.6 プロファイル構成JSONフォーマット
+- **サフィックスの一意性**: 同一プロファイル内で重複不可
+- **サフィックスの文字制限**: 半角英数 + `-`, `_` のみ（ファイル名セーフ）
+- **プロファイル名の表示名 vs baseFilename**: 明確に区別（編集UIで両方編集可）
+- **割り当てファイル数の上限**: 50枚（実用上十分、メモリ保護）
+
+### 6.7 sRGB 変換の実装方針（D-07）
+
+```typescript
+// 画像読み込み時に createImageBitmap を使用してsRGBに正規化
+async function loadImageAsSrgb(file: File): Promise<ImageBitmap> {
+  return await createImageBitmap(file, {
+    colorSpaceConversion: "default", // sRGBに正規化
+    imageOrientation: "from-image",  // EXIF回転を適用
+  });
+}
+```
+
+- 既存の `HTMLImageElement` ベース処理と**両方サポート**する抽象化層が必要
+- フォールバック: `createImageBitmap` 非対応環境では `HTMLImageElement` 使用（Canvas再描画で近似sRGB）
+- `imageProcessor.ts` の `processImage` シグネチャを拡張
+
+---
+
+## 7. 非機能要件
+
+### 7.1 パフォーマンス
+
+- バッチモードで**複数プロファイル × 複数画像 × 複数バリアント**の処理時もUI応答性維持
+- 例: 3プロファイル × 4画像 × 2バリアント = 24ファイル生成でも30秒以内
+- `setTimeout(0)` または `requestIdleCallback` で yield
+
+### 7.2 互換性
+
+- Chrome / Edge / Safari / Firefox 最新2バージョン
+- AVIFエンコード非対応ブラウザでは UI除外
+- `createImageBitmap` 非対応時のフォールバック動作
+
+### 7.3 セキュリティ・プライバシー
+
+- 全てブラウザ内処理
+- `localStorage` には構成のみ保存（画像本体は保存しない）
+- Cookieなし、トラッキングなし
+
+### 7.4 メンテナンス性
+
+- `imageProcessor.ts` を中心に共通処理を集約（Day 2で確立）
+- 型定義は `types.ts` に集約
+- プリセットは `builtinPresets.ts` に分離
+
+---
+
+## 8. ファイル構成（Day 3 完了時点）
+
+```
+E:\app\noviqlab\noviqlab-site\
+├── app/
+│   ├── page.tsx                        ← Day 1改修済み
+│   ├── contact/page.tsx                ← 既存
+│   ├── tools/
+│   │   ├── page.tsx                    ← Day 1実装済み
+│   │   ├── layout.tsx                  ← Day 1実装済み
+│   │   └── image-resizer/
+│   │       ├── page.tsx                ← Day 1実装、Day 2でlocalStorage追加
+│   │       ├── layout.tsx              ← Day 1実装（metadata用）
+│   │       ├── SimpleMode.tsx          ← Day 1実装、Day 2でリファクタ
+│   │       ├── BatchMode.tsx           ← Day 2実装、Day 3で拡張
+│   │       ├── ProfileEditor.tsx       ← Day 2実装、Day 3で拡張
+│   │       ├── types.ts                ← Day 2実装、Day 3で拡張
+│   │       ├── imageProcessor.ts       ← Day 2実装、Day 3で拡張（sRGB対応）
+│   │       └── builtinPresets.ts       ← Day 2実装、Day 3で調整
+│   └── layout.tsx                      ← 既存
+├── components/tools/
+│   ├── Breadcrumb.tsx                  ← Day 1実装済み
+│   └── ToolCard.tsx                    ← Day 1実装済み
+├── docs/tools/
+│   ├── REQUIREMENTS.md                 ← 本文書（v3.0）
+│   ├── CLAUDE_CODE_DAY1.md             ← Day 1指示書
+│   ├── CLAUDE_CODE_DAY2.md             ← Day 2指示書
+│   └── CLAUDE_CODE_DAY3.md             ← Day 3指示書（次に作成）
+└── E:\app\noviqlab\page.tsx            ← Geminiオリジナル雛形（参考用）
+```
+
+---
+
+## 9. Geminiコード由来のバグ修正（Day 1で全適用済み、Day 2でさらに統合）
+
+全項目、Day 1 実装時に適用完了。Day 2 で共通関数化してさらに一元管理。
+
+1. ✅ JSZip npm 化
+2. ✅ step-down resize `&&` → `||` 修正
+3. ✅ AVIF エンコード対応検出
+4. ✅ Object URL メモリリーク対策（6箇所）
+5. ✅ 未使用 import 整理
+6. ✅ non-null assertion 除去
+
+---
+
+## 10. 実装順序とマイルストーン
+
+### ✅ Day 1（完了、4時間）
+
+### ✅ Day 2（完了、約5時間）
+
+### ⏳ Day 3（予定、2〜3時間）
+
+1. **型定義拡張**（30分）
+   - `types.ts` に `AssignedImage` 追加、`BatchProfileAssignment.images` を配列化
+   - `Variant.minBytes` 追加
+
+2. **imageProcessor.ts 拡張**（30分）
+   - `encodeToTargetRange` 追加（minBytes対応）
+   - `loadImageAsSrgb` 追加（createImageBitmap）
+   - 既存関数の後方互換性維持
+
+3. **BatchMode.tsx UI改修**（1〜1.5時間）
+   - 画像割当UI複数化
+   - サフィックス入力欄追加
+   - 重複バリデーション
+   - 生成予定ファイル名リアルタイムプレビュー
+
+4. **ProfileEditor.tsx 拡張**（30分）
+   - バリアントに minBytes 入力欄
+
+5. **builtinPresets.ts 調整**（15分）
+   - 各プリセットに minBytes を実依頼仕様通りに設定
+
+6. **動作確認**（30〜60分）
+   - 実依頼ケース13ファイル再現テスト
+
+---
+
+## 11. 統合テスト項目（Day 3 追加分）
+
+### 11.1 シンプルモード退行テスト（最低4パターン）
+
+Day 1 の12パターンのうち、主要4つを再実施：
+1. PNG透過 → JPEG白背景
+2. 横長画像リサイズ
+3. 複数ファイル + ZIP
+4. AVIF検出
+
+### 11.2 バッチモード退行テスト（最低5パターン）
+
+Day 2 の10パターンのうち、重要5つを再実施：
+1. プロファイル作成・編集
+2. 容量目標250KB達成
+3. 達成不可能時の警告
+4. JSON Export/Import
+5. localStorage 復元
+
+### 11.3 Day 3 新機能テスト（10パターン）
+
+1. **1プロファイルに4画像割当 → 8ファイル生成**
+2. **サフィックス重複時のバリデーションエラー表示**
+3. **サフィックス未入力（空）での1枚運用**
+4. **元ファイル名が画像カードに表示される**
+5. **生成予定ファイル名が入力に応じてリアルタイム更新**
+6. **サフィックス削除後の再入力**
+7. **minBytes設定（200-300KB範囲）での容量調整**
+8. **範囲未達時（容量軽すぎ）の警告表示**
+9. **sRGB 変換動作（`createImageBitmap` 使用の確認）**
+10. **画像の割当順序がファイル名展開順に反映される**
+
+### 11.4 実依頼ケース完全再現（Phase 1 完了判定）
+
+**テストシナリオ**:
+
+```
+1. JSON 構成ファイルを事前に作成・保存
+   （hero / truck / tools / profile の4プロファイル）
+
+2. JSON読込 → 4プロファイル復元
+
+3. 各プロファイルに画像割当:
+   - hero: 横ー*.png 4枚、suffix a/b/c/d
+   - truck: 後ー*.png 4枚、suffix a/b/c/d
+   - tools: 袋ー*.png 4枚、suffix a/b/c/d
+   - profile: 田村さん写真1枚、suffix 空
+
+4. 「全て生成」
+
+5. 生成結果確認:
+   - hero-a.jpg (~100KB) / hero-a@2x.jpg (~250KB) ← 200-300KB範囲
+   - hero-b.jpg / hero-b@2x.jpg
+   - hero-c.jpg / hero-c@2x.jpg
+   - hero-d.jpg / hero-d@2x.jpg
+   - truck-a.jpg (~70KB) / truck-a@2x.jpg (~170KB)
+   - ... (truck-b, c, d 同様)
+   - tools-a.jpg ~ tools-d@2x.jpg
+   - profile.jpg (~65KB)
+
+   合計: 25ファイル（依頼の13ファイルを含む完全セット）
+
+6. ZIP DL → 納品用パッケージ完成
+```
+
+**合格基準**:
+- 全25ファイル生成成功
+- **依頼仕様の容量範囲を全て達成**（±10%の許容）
+- ファイル名が依頼仕様と完全一致
+- メモリリークなし
+
+---
+
+## 12. 完了判定基準（Phase 1 全体）
+
+### ✅ Day 1 完了基準（達成済み）
+
+- [x] `/` からToolsセクションが見え、`/tools` へ遷移できる
+- [x] `/tools` から `/tools/image-resizer` へ遷移できる
+- [x] シンプルモード12パターン全合格
+- [x] `npm run build` エラー・警告なし
+
+### ✅ Day 2 完了基準（達成済み）
+
+- [x] バッチモード10パターン全合格
+- [x] 容量自動調整が上限ギリギリで最適化
+- [x] JSON import/export 動作
+- [x] localStorage 自動保存・復元
+
+### ⏳ Day 3 完了基準（Phase 1 全体の合格ライン）
+
+- [ ] 複数画像割当機能が動作
+- [ ] サフィックス手動入力・重複バリデーション
+- [ ] minBytes 範囲指定での容量調整
+- [ ] 新機能10パターン全合格
+- [ ] **実依頼ケース25ファイル生成、依頼仕様通りの容量・ファイル名**
+- [ ] `npm run build` 成功
+- [ ] Lighthouse Performance 90+ / Accessibility 90+
+
+---
+
+## 13. リスクと対策（Day 3 追加分）
+
+| リスク | 対策 |
+|---|---|
+| 複数画像処理時のメモリ消費 | 50枚上限、逐次処理、Object URL 即時解放 |
+| サフィックス入力の操作性 | デフォルト空、TAB移動で連続入力しやすく |
+| `createImageBitmap` 非対応ブラウザ | 検出して `HTMLImageElement` にフォールバック |
+| バリデーションの煩わしさ | リアルタイムバリデーション、エラーは分かりやすく |
+| 既存JSON構成との後方互換 | `version` フィールドでマイグレーション、v1.0（単一画像）は読み込めるように |
+
+---
+
+## 14. JSONスキーマ v2.0（Day 3 対応版）
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "profiles": [
     {
       "id": "uuid-1",
       "name": "hero",
-      "baseFilename": "hero-a",
+      "displayName": "ヒーロー画像",
+      "baseFilename": "hero",
       "aspectRatio": { "type": "preset", "value": "16:9" },
       "cropPosition": "center",
       "format": "image/jpeg",
@@ -472,7 +681,8 @@ async function encodeToTargetSize(
           "name": "@2x",
           "width": 1600,
           "height": 900,
-          "maxBytes": 256000,
+          "minBytes": 204800,
+          "maxBytes": 307200,
           "suffix": "@2x"
         },
         {
@@ -480,279 +690,35 @@ async function encodeToTargetSize(
           "name": "mobile",
           "width": 800,
           "height": 450,
-          "maxBytes": 102400,
+          "minBytes": 81920,
+          "maxBytes": 122880,
           "suffix": ""
         }
       ]
     }
-  ]
+  ],
+  "exportedAt": "2026-04-20T21:30:00.000Z"
 }
 ```
 
-### 5.7 将来拡張（Phase 2以降、本要件外）
+**v1.0 からの変更点**:
+- `Variant.minBytes` 追加（オプショナル）
+- `Profile.displayName` 追加（UIでの表示名、任意）
+- `version` を `"1.0"` → `"2.0"` に更新
 
-- EXIF情報表示・GPS警告
-- Before/Afterスライダー比較
-- 顔検出によるクロップ位置自動調整（face-api.js等）
-- バッチモードの「プロファイル共有URL」生成
-- WebWorker化による処理の並列化
-- トリミング・回転
-
----
-
-## 6. 非機能要件
-
-### 6.1 パフォーマンス
-
-- 初期表示: 1秒以内（静的生成）
-- JSZip は**動的import**で初期バンドル肥大化回避
-- バッチモードで10枚×3バリアント=30枚処理時も UI ブロックしない
-- 処理中のプログレスバー表示必須
-
-### 6.2 互換性
-
-- 対応ブラウザ: Chrome / Edge / Safari / Firefox の最新2バージョン
-- AVIFエンコード非対応ブラウザでは該当ボタン非表示
-
-### 6.3 セキュリティ・プライバシー
-
-- 画像はサーバー送信しない（完全ブラウザ内処理）
-- 「ブラウザ内処理・サーバー送信なし」を明記
-- `localStorage` はプロファイル構成のみ保存（画像本体は保存しない）
-- Cookieなし、トラッキングなし
-
-### 6.4 メンテナンス性
-
-- ツール追加時は `app/tools/{slug}/page.tsx` を追加するだけで済む構造
-- 一覧ページはツールメタ情報を配列管理
-
-```tsx
-// app/tools/page.tsx
-const TOOLS = [
-  {
-    slug: "image-resizer",
-    name: "Image Converter",
-    icon: "🖼",
-    description: "画像のリサイズ・形式変換。Web制作バッチ・容量自動調整対応。",
-    tags: ["PNG", "JPEG", "WebP", "AVIF"],
-  },
-];
-```
-
-### 6.5 SEO
-
-- `/tools/image-resizer` の `<title>`: `Image Converter | NoviqLab Tools`
-- `<meta description>`: 機能要約1-2文
-- OGP画像: 当面は共通で可
+**互換性**:
+- v1.0 のJSONも読み込み可能（`minBytes` 未定義として扱う）
+- v2.0 エクスポート時は必ず `version: "2.0"` で出力
 
 ---
 
-## 7. ファイル構成（最終形）
+## 15. Phase 2 候補機能（本要件外、メモ）
 
-```
-E:\app\noviqlab\noviqlab-site\
-├── app/
-│   ├── page.tsx                        ← 改修（Toolsセクション追加）
-│   ├── contact/
-│   │   └── page.tsx                    ← 既存
-│   ├── tools/
-│   │   ├── page.tsx                    ← NEW: ツール一覧
-│   │   ├── layout.tsx                  ← NEW: Tools共通レイアウト
-│   │   └── image-resizer/
-│   │       ├── page.tsx                ← NEW: ツール本体（モード切替）
-│   │       ├── SimpleMode.tsx          ← NEW: シンプルモード
-│   │       ├── BatchMode.tsx           ← NEW: バッチモード
-│   │       ├── ProfileEditor.tsx       ← NEW: プロファイル編集モーダル
-│   │       ├── types.ts                ← NEW: 型定義
-│   │       ├── imageProcessor.ts       ← NEW: 画像処理ロジック
-│   │       └── builtinPresets.ts       ← NEW: 組み込みプリセット定義
-│   └── layout.tsx                      ← 既存
-├── components/
-│   └── tools/
-│       ├── Breadcrumb.tsx              ← NEW
-│       └── ToolCard.tsx                ← NEW
-├── docs/
-│   └── tools/
-│       └── REQUIREMENTS.md             ← 本文書
-└── E:\app\noviqlab\
-    └── page.tsx                        ← Geminiが生成した雛形（参考用）
-```
-
----
-
-## 8. Geminiコード由来のバグ修正事項
-
-`E:\app\noviqlab\page.tsx` を転記する際、以下を**必ず修正**する（シンプルモード実装時に適用）。
-
-### 8.1 JSZipをnpm installに切り替え
-
-**問題**: 元コードは CDN動的import (`https://cdn.jsdelivr.net/...`) を使用。Next.jsのwebpackが静的解析できずビルド失敗・CSP違反リスクがある。
-
-**対応**:
-
-```bash
-npm install jszip
-```
-
-```tsx
-// ❌ 削除
-const JSZip = (await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm" as any)).default;
-
-// ✅ 動的importで初期バンドル肥大化回避
-const { default: JSZip } = await import("jszip");
-```
-
-### 8.2 step-down resizeのwhile条件バグ
-
-**問題**: 元コード83行目の `&&` で横長画像など縦横比が大きく違う画像で段階縮小が効かない。
-
-**対応**:
-
-```tsx
-// ❌ バグ
-while (canvas.width / 2 > targetW && canvas.height / 2 > targetH) {
-
-// ✅ 修正
-while (canvas.width / 2 > targetW || canvas.height / 2 > targetH) {
-```
-
-### 8.3 AVIFエンコード非対応検出
-
-**対応**: 起動時に検出し、非対応ならUIから隠す。
-
-```tsx
-async function detectAvifSupport(): Promise<boolean> {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1; canvas.height = 1;
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob?.type === "image/avif"), "image/avif");
-  });
-}
-```
-
-### 8.4 Object URLのメモリリーク修正
-
-以下の箇所で `URL.revokeObjectURL` を必須：
-
-- `removeFile` 関数内
-- `setFiles([])`（すべて削除ボタン）
-- `processAll` で再変換時（古い `previewAfter` を revoke）
-- コンポーネントアンマウント時（`useEffect` cleanup）
-- `processImage` の `img.onerror` 内
-- **バッチモードでも同様にすべてのObjectURLを管理**
-
-### 8.5 未使用import削除
-
-1行目の `useEffect` が未使用。AVIF検出で使うなら残す、使わないなら削除。
-
-### 8.6 TypeScript strict対応
-
-- `ctx.getContext("2d")!` の `!` non-null assertion を nullチェックに置き換え
-- エッジケース（メモリ枯渇時等）を考慮
-
----
-
-## 9. 実装順序
-
-**推奨順序**（依存関係と確認しやすさを考慮）:
-
-### Day 1（4時間、基盤 + シンプルモード）
-
-1. **Breadcrumb/ToolCard コンポーネント作成**（30分）
-2. **`/tools` レイアウト + 一覧ページ**（30分）
-3. **トップページにToolsセクション追加**（20分）
-4. **`/tools/image-resizer` モード切替タブ + シンプルモード実装**（2h 40分、雛形転記 + バグ修正）
-5. **シンプルモード統合テスト**（12パターン、1h）
-
-### Day 2（5時間、バッチモード）
-
-6. **型定義・共通処理抽出（`types.ts` / `imageProcessor.ts`）**（1h）
-7. **バッチモードUI骨格 + プロファイル編集モーダル**（1.5h）
-8. **容量目標自動調整ロジック実装・テスト**（1h）
-9. **組み込みプリセット定義 + JSON import/export**（1h）
-10. **バッチモード統合テスト**（バッチ専用テスト項目、30分）
-
-### Day 2 後半 or Day 3（1.5時間、仕上げ）
-
-11. **`npm run build` 確認・デプロイ**（30分）
-12. **本番動作確認 + Lighthouse**（30分）
-13. **READMEや説明文の追加（ツール内のヘルプテキスト）**（30分）
-
-**合計見積もり: 10〜11時間**
-
----
-
-## 10. 統合テスト項目
-
-### 10.1 シンプルモード（12パターン）
-
-1. PNG（透過あり）→ JPEG 変換 → 背景色が白で塗られているか
-2. PNG（透過あり）→ JPEG 変換 → 背景色を `#000000` に変更して反映されるか
-3. 横長画像（3000×500）→ 幅800にリサイズ → アスペクト比維持で高さ計算OK
-4. 縦長画像（500×3000）→ 高さ800にリサイズ → 同上
-5. アスペクト比ロック**OFF**で幅のみ指定 → 高さは元サイズのまま
-6. 大容量画像（4000×3000以上、5MB超）→ クラッシュせず処理完了
-7. 複数ファイル（5枚以上）一括変換 → 全て成功
-8. ZIP一括DL → ファイル名重複せず拡張子正しい
-9. 変換後に「すべて削除」→ メモリリークしない（DevTools Memory）
-10. 明るさ/コントラスト/彩度を+50で変換 → 見た目が変わる
-11. AVIFボタン → 対応時はAVIF出力、非対応時は UI 非表示
-12. D&D・クリック選択両方でファイル追加できる
-
-### 10.2 バッチモード専用（10パターン）
-
-13. プロファイル新規作成 → `hero` プロファイル追加・編集 → 保存
-14. バリアント追加 → `@2x` / `mobile` の2つ定義 → 保存
-15. プロファイルに画像割り当て → 全バリアント生成 → ファイル名ルール正しい
-16. **容量目標250KB設定で1600×900 JPEG生成 → 結果が250KB以下か**
-17. **容量目標が達成不可能な場合の警告表示**
-18. 中央クロップ：正方形プロファイルに横長画像を入れて中央が切り出されるか
-19. 上クロップ・下クロップ: それぞれ正しい位置で切り出されるか
-20. プロファイル構成をJSONエクスポート → 再読み込みで復元できる
-21. ブラウザリロード → `localStorage` からプロファイル構成が復元される
-22. 3プロファイル × 各2バリアントで画像3枚処理 = 18枚生成 → ZIP正常
-
-### 10.3 統合（3パターン）
-
-23. パンくずリンク全方向正常動作（トップ ↔ /tools ↔ /tools/image-resizer）
-24. モバイルサイズ（375px幅）で崩れないか（両モード）
-25. モード切替時にデータ干渉しないか
-
----
-
-## 11. 完了判定基準
-
-- [ ] `/` からToolsセクションが見え、`/tools` へ遷移できる
-- [ ] `/tools` から `/tools/image-resizer` へ遷移できる
-- [ ] シンプルモード12パターン全合格
-- [ ] バッチモード10パターン全合格
-- [ ] 統合3パターン全合格
-- [ ] `npm run build` が警告・エラーなく成功
-- [ ] 本番デプロイ後、Lighthouse Performance 90+ / Accessibility 90+
-- [ ] パンくずリンク全方向正常動作
-- [ ] モバイル表示正常
-- [ ] 実際に依頼された写真最適化タスク（hero-a / truck-a / tools-a / profile.jpg）をバッチモードで再現できる
-
----
-
-## 12. リスクと対策
-
-| リスク | 対策 |
-|---|---|
-| 容量目標値に収まらないケース | 警告表示 + リサイズ提案 UI |
-| バッチモード処理中のブラウザフリーズ | `setTimeout(0)` or `requestIdleCallback` で yield |
-| プロファイル構成の破損 | JSONスキーマバリデーション、破損時は初期化 |
-| `localStorage` 容量超過 | 画像本体は保存しない（構成のみ）、サイズ警告 |
-| 大量画像の同時処理でメモリ枯渇 | 順次処理 + 中間Canvas廃棄徹底 |
-
----
-
-## 13. Phase 2 候補機能（メモ）
-
-- **EXIF剥がし + 可視化**: `exifr` ライブラリ（~15KB）、GPS警告機能
-- **Before/Afterスライダー比較**: CSS `clip-path: inset()` で実装
-- **顔検出自動クロップ**: face-api.js or BlazeFace（profileクロップの精度向上）
-- **プロファイル共有URL**: JSON を URL safe base64 で埋め込み
+- **EXIF剥がし + 可視化**（`exifr` ライブラリ）
+- **Before/Afterスライダー比較**（CSS clip-path）
+- **顔検出自動クロップ**（face-api.js or BlazeFace）→ profile画像用
+- **プロファイル共有URL**（JSON→URL safe base64）
+- **WebWorker化**（処理並列化）
 
 ---
 

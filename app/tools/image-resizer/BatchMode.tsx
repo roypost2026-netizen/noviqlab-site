@@ -6,11 +6,13 @@ import type {
   Profile,
   Variant,
   BatchProfileAssignment,
+  AssignedImage,
   BatchVariantResult,
   BatchConfigJson,
   OutputFormat,
 } from "./types";
-import { cropAndResize, encodeToTargetSize, detectAvifSupport } from "./imageProcessor";
+import { migrateBatchConfig } from "./types";
+import { processBatchImage, detectAvifSupport } from "./imageProcessor";
 import { BUILTIN_PRESETS, instantiatePreset } from "./builtinPresets";
 import ProfileEditor from "./ProfileEditor";
 
@@ -22,13 +24,12 @@ const FORMAT_EXT: Record<OutputFormat, string> = {
 };
 
 const STORAGE_KEY = "image-resizer-batch-profiles";
+const SUFFIX_RE = /^[a-zA-Z0-9_-]*$/;
+const MAX_IMAGES_PER_PROFILE = 50;
 
 function genId(): string {
-  try {
-    return crypto.randomUUID();
-  } catch {
-    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  }
+  try { return crypto.randomUUID(); }
+  catch { return `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 }
 
 function formatBytes(bytes: number): string {
@@ -37,43 +38,43 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function generateFilename(
-  profile: Profile,
-  variant: Variant,
-  existingFilenames: Set<string>
-): string {
-  const ext = FORMAT_EXT[profile.format];
-  const base = profile.baseFilename;
-  const suffix = variant.suffix || "";
-  let candidate = `${base}${suffix}.${ext}`;
-
-  if (!existingFilenames.has(candidate)) return candidate;
-
-  let counter = 2;
-  while (existingFilenames.has(`${base}${suffix}-${counter}.${ext}`)) {
-    counter++;
-  }
-  return `${base}${suffix}-${counter}.${ext}`;
+function buildFilename(base: string, imageSuffix: string, variantSuffix: string, ext: string): string {
+  return `${base}${imageSuffix}${variantSuffix}.${ext}`;
 }
 
-function loadProfiles(): Profile[] {
+function formatRange(v: Variant): string {
+  if (v.minBytes && v.maxBytes) return `${Math.round(v.minBytes / 1024)}–${Math.round(v.maxBytes / 1024)}KB`;
+  if (v.maxBytes) return `上限${Math.round(v.maxBytes / 1024)}KB`;
+  if (v.minBytes) return `下限${Math.round(v.minBytes / 1024)}KB`;
+  return "";
+}
+
+function loadProfilesFromStorage(): Profile[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed as Profile[];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-function saveProfiles(profiles: Profile[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
-  } catch {
-    // プライベートブラウジング等で失敗しても続行
-  }
+function saveProfilesToStorage(profiles: Profile[]): void {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles)); }
+  catch { /* プライベートブラウジング等 */ }
+}
+
+function makeEmptyAssignment(profileId: string): BatchProfileAssignment {
+  return { profileId, images: [], status: "waiting" };
+}
+
+/** サフィックス重複チェック: 重複しているsuffixのセットを返す */
+function findDuplicateSuffixes(images: AssignedImage[]): Set<string> {
+  const seen = new Map<string, number>();
+  images.forEach((img) => { seen.set(img.imageSuffix, (seen.get(img.imageSuffix) ?? 0) + 1); });
+  const dups = new Set<string>();
+  seen.forEach((count, suffix) => { if (count > 1) dups.add(suffix); });
+  return dups;
 }
 
 export default function BatchMode() {
@@ -85,7 +86,7 @@ export default function BatchMode() {
   const [progress, setProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [avifSupported, setAvifSupported] = useState(false);
   const [showPresetDropdown, setShowPresetDropdown] = useState(false);
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const multiFileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const initialized = useRef(false);
 
@@ -93,24 +94,21 @@ export default function BatchMode() {
     detectAvifSupport().then(setAvifSupported);
     if (!initialized.current) {
       initialized.current = true;
-      const saved = loadProfiles();
+      const saved = loadProfilesFromStorage();
       if (saved.length > 0) {
         setProfiles(saved);
-        setAssignments(
-          saved.map((p) => ({ profileId: p.id, file: null, status: "waiting" }))
-        );
+        setAssignments(saved.map((p) => makeEmptyAssignment(p.id)));
       }
     }
   }, []);
 
-  // アンマウント時に Object URL を revoke
+  // アンマウント時に Object URL を全 revoke
   useEffect(() => {
     return () => {
       setAssignments((prev) => {
         prev.forEach((a) => {
-          if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-          a.results?.forEach((r) => {
-            // results の blob は download 後に revoke 済みまたは GC に任せる
+          a.images.forEach((img) => {
+            if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
           });
         });
         return prev;
@@ -121,15 +119,13 @@ export default function BatchMode() {
   const syncAssignments = (newProfiles: Profile[]) => {
     setAssignments((prev) => {
       const kept = new Map(prev.map((a) => [a.profileId, a]));
-      return newProfiles.map((p) =>
-        kept.get(p.id) ?? { profileId: p.id, file: null, status: "waiting" }
-      );
+      return newProfiles.map((p) => kept.get(p.id) ?? makeEmptyAssignment(p.id));
     });
   };
 
   const updateProfiles = (newProfiles: Profile[]) => {
     setProfiles(newProfiles);
-    saveProfiles(newProfiles);
+    saveProfilesToStorage(newProfiles);
     syncAssignments(newProfiles);
   };
 
@@ -146,7 +142,7 @@ export default function BatchMode() {
   const handleDeleteProfile = (id: string) => {
     if (!confirm("このプロファイルを削除しますか？")) return;
     const a = assignments.find((a) => a.profileId === id);
-    if (a?.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    a?.images.forEach((img) => { if (img.previewUrl) URL.revokeObjectURL(img.previewUrl); });
     updateProfiles(profiles.filter((p) => p.id !== id));
   };
 
@@ -156,109 +152,142 @@ export default function BatchMode() {
     setShowPresetDropdown(false);
   };
 
-  const handleFileAssign = (profileId: string, file: File) => {
-    setAssignments((prev) => {
-      return prev.map((a) => {
-        if (a.profileId !== profileId) return a;
-        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+  // -a, -b, ..., -z → -img1, -img2, ... の順で未使用 suffix を返す
+  function findNextSuffix(used: Set<string>): string {
+    for (let i = 0; i < 26; i++) {
+      const candidate = `-${String.fromCharCode(97 + i)}`;
+      if (!used.has(candidate)) return candidate;
+    }
+    let n = 1;
+    while (used.has(`-img${n}`)) n++;
+    return `-img${n}`;
+  }
+
+  // 複数画像を追加（suffix 自動割当）
+  const handleAddImages = (profileId: string, files: FileList | File[]) => {
+    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (arr.length === 0) return;
+
+    setAssignments((prev) => prev.map((a) => {
+      if (a.profileId !== profileId) return a;
+      const remaining = MAX_IMAGES_PER_PROFILE - a.images.length;
+      const toAdd = arr.slice(0, remaining);
+
+      const used = new Set(a.images.map((img) => img.imageSuffix));
+      const newImages: AssignedImage[] = toAdd.map((file) => {
+        const suffix = findNextSuffix(used);
+        used.add(suffix);
         return {
-          ...a,
+          id: genId(),
           file,
+          imageSuffix: suffix,
           previewUrl: URL.createObjectURL(file),
-          results: undefined,
           status: "waiting",
         };
       });
-    });
+      return { ...a, images: [...a.images, ...newImages], status: "waiting" };
+    }));
+  };
+
+  // 画像のサフィックス更新
+  const handleSuffixChange = (profileId: string, imageId: string, suffix: string) => {
+    setAssignments((prev) => prev.map((a) => {
+      if (a.profileId !== profileId) return a;
+      return {
+        ...a,
+        images: a.images.map((img) =>
+          img.id === imageId ? { ...img, imageSuffix: suffix } : img
+        ),
+      };
+    }));
+  };
+
+  // 画像削除
+  const handleRemoveImage = (profileId: string, imageId: string) => {
+    setAssignments((prev) => prev.map((a) => {
+      if (a.profileId !== profileId) return a;
+      const img = a.images.find((i) => i.id === imageId);
+      if (img?.previewUrl) URL.revokeObjectURL(img.previewUrl);
+      return { ...a, images: a.images.filter((i) => i.id !== imageId) };
+    }));
   };
 
   const processAll = async () => {
-    const ready = assignments.filter((a) => a.file);
-    if (ready.length === 0) return;
+    const readyAssignments = assignments.filter((a) => a.images.length > 0);
+    if (readyAssignments.length === 0) return;
 
-    const total = ready.reduce((sum, a) => {
+    const total = readyAssignments.reduce((sum, a) => {
       const profile = profiles.find((p) => p.id === a.profileId);
-      return sum + (profile?.variants.length ?? 0);
+      return sum + a.images.length * (profile?.variants.length ?? 0);
     }, 0);
 
     setIsProcessing(true);
     setProgress({ done: 0, total });
-
     let done = 0;
 
-    for (const assignment of ready) {
+    for (const assignment of readyAssignments) {
       const profile = profiles.find((p) => p.id === assignment.profileId);
-      if (!profile || !assignment.file) continue;
+      if (!profile) continue;
 
-      const results: BatchVariantResult[] = [];
-      const existingFilenames = new Set<string>();
+      const updatedImages: AssignedImage[] = [...assignment.images];
 
-      for (const variant of profile.variants) {
-        await new Promise((r) => setTimeout(r, 0)); // UI 応答性維持
+      for (let imgIdx = 0; imgIdx < updatedImages.length; imgIdx++) {
+        const image = updatedImages[imgIdx];
+        const imageResults: BatchVariantResult[] = [];
 
-        try {
-          const img = await loadImage(assignment.file);
-          const canvas = cropAndResize(
-            img,
-            profile.aspectRatio,
-            profile.cropPosition,
-            variant.width,
-            variant.height
+        for (const variant of profile.variants) {
+          await new Promise((r) => setTimeout(r, 0)); // UI 応答性維持
+
+          const filename = buildFilename(
+            profile.baseFilename,
+            image.imageSuffix,
+            variant.suffix,
+            FORMAT_EXT[profile.format]
           );
 
-          let blob: Blob;
-          let warning: string | undefined;
-
-          if (variant.maxBytes) {
-            const result = await encodeToTargetSize(canvas, profile.format, variant.maxBytes);
-            blob = result.blob;
-            warning = result.warning;
-          } else {
-            const b = await import("./imageProcessor").then((m) =>
-              m.canvasToBlob(canvas, profile.format, 0.85)
-            );
-            blob = b ?? new Blob();
+          try {
+            const { blob, warning } = await processBatchImage(image.file, profile, variant);
+            imageResults.push({
+              variantId: variant.id,
+              imageSuffix: image.imageSuffix,
+              filename,
+              blob,
+              actualBytes: blob.size,
+              targetMinBytes: variant.minBytes,
+              targetMaxBytes: variant.maxBytes,
+              warning,
+            });
+          } catch (e) {
+            imageResults.push({
+              variantId: variant.id,
+              imageSuffix: image.imageSuffix,
+              filename,
+              blob: new Blob(),
+              actualBytes: 0,
+              warning: `処理エラー: ${String(e)}`,
+            });
           }
 
-          const filename = generateFilename(profile, variant, existingFilenames);
-          existingFilenames.add(filename);
-
-          results.push({
-            variantId: variant.id,
-            filename,
-            blob,
-            actualBytes: blob.size,
-            targetBytes: variant.maxBytes,
-            warning,
-          });
-        } catch (e) {
-          results.push({
-            variantId: variant.id,
-            filename: `error-${variant.id}.${FORMAT_EXT[profile.format]}`,
-            blob: new Blob(),
-            actualBytes: 0,
-            warning: `処理エラー: ${String(e)}`,
-          });
+          done++;
+          setProgress({ done, total });
         }
 
-        done++;
-        setProgress({ done, total });
-      }
-
-      setAssignments((prev) =>
-        prev.map((a) =>
+        updatedImages[imgIdx] = { ...image, results: imageResults, status: "done" };
+        setAssignments((prev) => prev.map((a) =>
           a.profileId === assignment.profileId
-            ? { ...a, results, status: "done" }
+            ? { ...a, images: updatedImages.map((img) => ({ ...img })), status: "done" }
             : a
-        )
-      );
+        ));
+      }
     }
 
     setIsProcessing(false);
   };
 
   const downloadAll = async () => {
-    const allResults = assignments.flatMap((a) => a.results ?? []);
+    const allResults = assignments.flatMap((a) =>
+      a.images.flatMap((img) => img.results ?? [])
+    );
     if (allResults.length === 0) return;
 
     const { default: JSZip } = await import("jszip");
@@ -290,7 +319,7 @@ export default function BatchMode() {
 
   const handleExportJson = () => {
     const config: BatchConfigJson = {
-      version: "1.0",
+      version: "2.0",
       profiles,
       exportedAt: new Date().toISOString(),
     };
@@ -308,35 +337,29 @@ export default function BatchMode() {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const json = JSON.parse(e.target?.result as string) as BatchConfigJson;
-        if (!json.version || !Array.isArray(json.profiles)) {
-          alert("JSONフォーマットが不正です。'version' と 'profiles' が必要です。");
-          return;
-        }
-        for (const p of json.profiles) {
-          if (!p.id || !p.name || !p.baseFilename || !Array.isArray(p.variants)) {
-            alert("プロファイルの必須フィールドが欠けています。");
-            return;
-          }
-        }
-        updateProfiles(json.profiles);
-      } catch {
-        alert("JSONの読み込みに失敗しました。");
+        const raw = JSON.parse(e.target?.result as string);
+        const config = migrateBatchConfig(raw);
+        updateProfiles(config.profiles);
+      } catch (err) {
+        alert(`JSONの読み込みに失敗しました: ${String(err)}`);
       }
     };
     reader.readAsText(file);
   };
 
-  const hasResults = assignments.some((a) => a.results && a.results.length > 0);
+  const hasResults = assignments.some((a) => a.images.some((img) => img.results && img.results.length > 0));
+  const totalFileCount = assignments.reduce((sum, a) => {
+    const profile = profiles.find((p) => p.id === a.profileId);
+    return sum + a.images.length * (profile?.variants.length ?? 0);
+  }, 0);
+  const hasAnyImage = assignments.some((a) => a.images.length > 0);
 
   return (
     <>
       {/* プロファイル管理セクション */}
       <div className="space-y-4 mb-8">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest">
-            バッチプロファイル
-          </h2>
+          <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest">バッチプロファイル</h2>
           <div className="flex gap-2">
             <button
               onClick={() => { setEditingProfile(null); setIsEditorOpen(true); }}
@@ -352,7 +375,7 @@ export default function BatchMode() {
                 プリセット読み込み ▼
               </button>
               {showPresetDropdown && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-[#0b1120] border border-white/10 rounded-xl z-20 overflow-hidden">
+                <div className="absolute right-0 top-full mt-1 w-60 bg-[#0b1120] border border-white/10 rounded-xl z-20 overflow-hidden">
                   {BUILTIN_PRESETS.map((p, i) => (
                     <button
                       key={i}
@@ -380,7 +403,9 @@ export default function BatchMode() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-white text-sm">{profile.name}</span>
+                      <span className="font-semibold text-white text-sm">
+                        {profile.displayName || profile.name}
+                      </span>
                       <span className="text-xs font-mono text-white/30">
                         {profile.aspectRatio.value} · {profile.format.split("/")[1].toUpperCase()}
                       </span>
@@ -388,9 +413,9 @@ export default function BatchMode() {
                     <div className="space-y-0.5">
                       {profile.variants.map((v) => (
                         <p key={v.id} className="text-xs text-white/40 font-mono">
-                          {profile.baseFilename}{v.suffix}.{FORMAT_EXT[profile.format]} —{" "}
+                          {profile.baseFilename}-*{v.suffix}.{FORMAT_EXT[profile.format]} —{" "}
                           {v.width}×{v.height}px
-                          {v.maxBytes ? ` / 上限 ${Math.round(v.maxBytes / 1024)}KB` : ""}
+                          {formatRange(v) ? ` / ${formatRange(v)}` : ""}
                         </p>
                       ))}
                     </div>
@@ -416,30 +441,22 @@ export default function BatchMode() {
         )}
 
         {/* JSON Import/Export */}
-        {profiles.length > 0 && (
-          <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {profiles.length > 0 && (
             <button
               onClick={handleExportJson}
               className="text-xs bg-white/5 hover:bg-white/10 text-white/60 px-3 py-1.5 rounded-lg transition-all"
             >
               プロファイルをJSONで保存
             </button>
-            <button
-              onClick={() => jsonInputRef.current?.click()}
-              className="text-xs bg-white/5 hover:bg-white/10 text-white/60 px-3 py-1.5 rounded-lg transition-all"
-            >
-              JSONから読み込み
-            </button>
-          </div>
-        )}
-        {profiles.length === 0 && (
+          )}
           <button
             onClick={() => jsonInputRef.current?.click()}
             className="text-xs bg-white/5 hover:bg-white/10 text-white/60 px-3 py-1.5 rounded-lg transition-all"
           >
             JSONから読み込み
           </button>
-        )}
+        </div>
         <input
           ref={jsonInputRef}
           type="file"
@@ -460,90 +477,177 @@ export default function BatchMode() {
             画像を割り当てて生成
           </h2>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-4">
             {assignments.map((assignment) => {
               const profile = profiles.find((p) => p.id === assignment.profileId);
               if (!profile) return null;
 
+              const ext = FORMAT_EXT[profile.format];
+              const duplicateSuffixes = findDuplicateSuffixes(assignment.images);
+              const hasDuplicates = duplicateSuffixes.size > 0;
+
+              // 生成予定ファイル名を計算
+              const plannedFiles = hasDuplicates ? [] : assignment.images.flatMap((img) =>
+                profile.variants.map((v) => ({
+                  name: buildFilename(profile.baseFilename, img.imageSuffix, v.suffix, ext),
+                  range: formatRange(v),
+                }))
+              );
+
               return (
                 <div key={assignment.profileId} className="bg-white/5 rounded-xl p-4 space-y-3">
+                  {/* プロファイルヘッダー */}
                   <div>
-                    <p className="text-sm font-semibold text-white">{profile.name}</p>
-                    <p className="text-xs text-white/40 font-mono">{profile.baseFilename}</p>
-                  </div>
-
-                  {/* ドロップゾーン */}
-                  <div
-                    className="border border-dashed border-white/20 rounded-lg p-4 text-center cursor-pointer hover:border-white/40 hover:bg-white/5 transition-all relative"
-                    onClick={() => fileInputRefs.current[assignment.profileId]?.click()}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const file = e.dataTransfer.files[0];
-                      if (file?.type.startsWith("image/")) handleFileAssign(assignment.profileId, file);
-                    }}
-                  >
-                    {assignment.previewUrl ? (
-                      <img
-                        src={assignment.previewUrl}
-                        alt=""
-                        className="w-full h-20 object-cover rounded"
-                      />
-                    ) : (
-                      <p className="text-xs text-white/30">画像をドロップ or クリック</p>
-                    )}
-                    {assignment.file && (
-                      <p className="text-xs text-white/40 mt-1 truncate">{assignment.file.name}</p>
-                    )}
-                    <input
-                      ref={(el) => { fileInputRefs.current[assignment.profileId] = el; }}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleFileAssign(assignment.profileId, file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </div>
-
-                  {/* 生成ファイル名プレビュー */}
-                  <div className="space-y-0.5">
-                    {profile.variants.map((v) => (
-                      <p key={v.id} className="text-xs text-white/30 font-mono">
-                        → {profile.baseFilename}{v.suffix}.{FORMAT_EXT[profile.format]}
-                      </p>
-                    ))}
-                  </div>
-
-                  {/* 結果表示 */}
-                  {assignment.results && (
-                    <div className="space-y-1 pt-2 border-t border-white/10">
-                      {assignment.results.map((r) => (
-                        <div key={r.variantId} className="flex items-start justify-between gap-1">
-                          <span className="text-xs font-mono text-white/50 truncate">{r.filename}</span>
-                          <span
-                            className={`text-xs font-mono flex-shrink-0 ${
-                              r.warning ? "text-amber-400" : "text-sky-400"
-                            }`}
-                          >
-                            {formatBytes(r.actualBytes)}
-                            {r.warning && " ⚠"}
-                          </span>
-                        </div>
+                    <p className="text-sm font-semibold text-white">
+                      {profile.displayName || profile.name}
+                    </p>
+                    <p className="text-xs text-white/40 font-mono">
+                      {profile.aspectRatio.value} · {profile.format.split("/")[1].toUpperCase()}
+                    </p>
+                    <div className="mt-1 space-y-0.5">
+                      {profile.variants.map((v) => (
+                        <p key={v.id} className="text-xs text-white/30 font-mono">
+                          {profile.baseFilename}-*{v.suffix}.{ext} — {v.width}×{v.height}px
+                          {formatRange(v) ? ` / ${formatRange(v)}` : ""}
+                        </p>
                       ))}
-                      {assignment.results.some((r) => r.warning) && (
-                        <div className="mt-1 space-y-0.5">
-                          {assignment.results
-                            .filter((r) => r.warning)
-                            .map((r) => (
-                              <p key={r.variantId} className="text-xs text-amber-400/70">
-                                {r.warning}
-                              </p>
-                            ))}
-                        </div>
-                      )}
+                    </div>
+                  </div>
+
+                  {/* ドロップゾーン（複数追加） */}
+                  {assignment.images.length < MAX_IMAGES_PER_PROFILE && (
+                    <div
+                      className="border border-dashed border-white/20 rounded-lg p-3 text-center cursor-pointer hover:border-sky-400/50 hover:bg-sky-400/5 transition-all"
+                      onClick={() => multiFileInputRefs.current[assignment.profileId]?.click()}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        handleAddImages(assignment.profileId, e.dataTransfer.files);
+                      }}
+                    >
+                      <p className="text-xs text-white/30">
+                        画像を一括ドロップ or クリックして選択
+                        {assignment.images.length > 0 && ` (${assignment.images.length}枚追加済)`}
+                      </p>
+                      <input
+                        ref={(el) => { multiFileInputRefs.current[assignment.profileId] = el; }}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files) handleAddImages(assignment.profileId, e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* 割当済み画像リスト */}
+                  {assignment.images.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-white/40">割当済み（{assignment.images.length}枚）:</p>
+                      {assignment.images.map((img) => {
+                        const isDuplicate = duplicateSuffixes.has(img.imageSuffix) && !(img.imageSuffix === "" && duplicateSuffixes.has("") === false);
+                        const isInvalidSuffix = img.imageSuffix !== "" && !SUFFIX_RE.test(img.imageSuffix);
+                        const suffixError = isDuplicate
+                          ? "サフィックスが重複しています"
+                          : isInvalidSuffix
+                          ? "半角英数・ハイフン・アンダースコアのみ使用可"
+                          : null;
+
+                        return (
+                          <div key={img.id} className="bg-white/5 rounded-lg p-2 space-y-2">
+                            <div className="flex items-center gap-2">
+                              {/* サムネイル */}
+                              {img.previewUrl && (
+                                <img
+                                  src={img.previewUrl}
+                                  alt=""
+                                  className="w-10 h-10 object-cover rounded flex-shrink-0"
+                                />
+                              )}
+                              {/* ファイル名 */}
+                              <span className="text-xs text-white/50 truncate flex-1 min-w-0">
+                                {img.file.name}
+                              </span>
+                              {/* 削除 */}
+                              <button
+                                onClick={() => handleRemoveImage(assignment.profileId, img.id)}
+                                className="text-white/20 hover:text-red-400 text-sm flex-shrink-0 transition-colors"
+                                aria-label="削除"
+                              >
+                                ×
+                              </button>
+                            </div>
+
+                            {/* サフィックス入力 */}
+                            <div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs text-white/30 flex-shrink-0">suffix:</span>
+                                <input
+                                  type="text"
+                                  placeholder="（空 = suffixなし）"
+                                  value={img.imageSuffix}
+                                  onChange={(e) =>
+                                    handleSuffixChange(assignment.profileId, img.id, e.target.value)
+                                  }
+                                  className={`flex-1 bg-white/10 rounded px-2 py-1 text-xs text-white placeholder-white/20 outline-none focus:ring-1 ${
+                                    suffixError ? "ring-1 ring-red-400 focus:ring-red-400" : "focus:ring-sky-400"
+                                  }`}
+                                />
+                              </div>
+                              {suffixError && (
+                                <p className="text-xs text-red-400 mt-0.5">{suffixError}</p>
+                              )}
+                            </div>
+
+                            {/* 生成結果（処理済みの場合） */}
+                            {img.results && img.results.length > 0 && (
+                              <div className="pt-1 border-t border-white/10 space-y-0.5">
+                                {img.results.map((r) => (
+                                  <div key={r.variantId} className="flex items-center justify-between gap-1">
+                                    <span className="text-xs font-mono text-white/40 truncate">{r.filename}</span>
+                                    <span
+                                      className={`text-xs font-mono flex-shrink-0 ${
+                                        r.warning ? "text-amber-400" : "text-sky-400"
+                                      }`}
+                                    >
+                                      {formatBytes(r.actualBytes)}{r.warning && " ⚠"}
+                                    </span>
+                                  </div>
+                                ))}
+                                {img.results.some((r) => r.warning) && (
+                                  <div className="space-y-0.5 mt-0.5">
+                                    {img.results.filter((r) => r.warning).map((r) => (
+                                      <p key={r.variantId} className="text-xs text-amber-400/70">{r.warning}</p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* 重複警告 */}
+                  {hasDuplicates && (
+                    <p className="text-xs text-red-400">
+                      サフィックスが重複しています。全て一意にしてから生成してください。
+                    </p>
+                  )}
+
+                  {/* 生成予定ファイルリスト */}
+                  {plannedFiles.length > 0 && (
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-white/30">生成予定: {plannedFiles.length}ファイル</p>
+                      {plannedFiles.map((f, i) => (
+                        <p key={i} className="text-xs font-mono text-white/30">
+                          → {f.name}{f.range ? ` (目標 ${f.range})` : ""}
+                        </p>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -561,7 +665,9 @@ export default function BatchMode() {
               <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-sky-500 transition-all duration-300"
-                  style={{ width: progress.total > 0 ? `${(progress.done / progress.total) * 100}%` : "0%" }}
+                  style={{
+                    width: progress.total > 0 ? `${(progress.done / progress.total) * 100}%` : "0%",
+                  }}
                 />
               </div>
             </div>
@@ -571,10 +677,14 @@ export default function BatchMode() {
           <div className="flex gap-3">
             <button
               onClick={processAll}
-              disabled={isProcessing || assignments.every((a) => !a.file)}
+              disabled={isProcessing || !hasAnyImage || assignments.some((a) => findDuplicateSuffixes(a.images).size > 0)}
               className="flex-1 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all"
             >
-              {isProcessing ? "生成中..." : "全て生成"}
+              {isProcessing
+                ? "生成中..."
+                : hasAnyImage
+                ? `全て生成（${totalFileCount}ファイル）`
+                : "全て生成"}
             </button>
             {hasResults && (
               <button
@@ -606,14 +716,4 @@ export default function BatchMode() {
       />
     </>
   );
-}
-
-function loadImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("画像の読み込みに失敗しました")); };
-    img.src = url;
-  });
 }
