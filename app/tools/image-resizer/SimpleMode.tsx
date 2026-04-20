@@ -2,8 +2,14 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
+import {
+  detectAvifSupport,
+  canvasToBlob,
+  stepDownResize,
+  fillJpegBackground,
+} from "./imageProcessor";
+import type { OutputFormat } from "./types";
 
-type OutputFormat = "image/jpeg" | "image/png" | "image/webp" | "image/avif";
 type FileStatus = "waiting" | "processing" | "done" | "error";
 
 interface ImageFile {
@@ -46,16 +52,6 @@ const PRESETS = [
   { label: "4K", width: 3840, height: 2160 },
 ];
 
-// 8.3: AVIF エンコード対応検出
-async function detectAvifSupport(): Promise<boolean> {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1;
-  canvas.height = 1;
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob?.type === "image/avif"), "image/avif");
-  });
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -69,8 +65,7 @@ async function processImage(
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = () => {
-      // 8.4: img.onerror 内の revoke は onerror 側に移動済み
+    img.onload = async () => {
       try {
         let targetW = img.width;
         let targetH = img.height;
@@ -95,65 +90,36 @@ async function processImage(
           }
         }
 
-        // step-down resize for quality
-        let canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-
-        // 8.6: non-null assertion を null チェックに置換
-        const ctx0 = canvas.getContext("2d");
-        if (!ctx0) {
-          URL.revokeObjectURL(url);
-          return reject(new Error("Canvas 2D context の取得に失敗しました"));
-        }
-        ctx0.drawImage(img, 0, 0);
-
-        // 8.2: && → || に修正（横長・縦長画像で段階縮小が効かないバグ修正）
-        while (canvas.width / 2 > targetW || canvas.height / 2 > targetH) {
-          const tmp = document.createElement("canvas");
-          tmp.width = Math.max(1, Math.floor(canvas.width / 2));
-          tmp.height = Math.max(1, Math.floor(canvas.height / 2));
-          const tmpCtx = tmp.getContext("2d");
-          if (!tmpCtx) break;
-          tmpCtx.drawImage(canvas, 0, 0, tmp.width, tmp.height);
-          canvas = tmp;
-        }
+        // step-down resize（imageProcessor の共通関数を使用）
+        const stepped = stepDownResize(img, targetW, targetH);
 
         const final = document.createElement("canvas");
         final.width = targetW;
         final.height = targetH;
         const ctx = final.getContext("2d");
-        // 8.6: non-null assertion を null チェックに置換
         if (!ctx) {
           URL.revokeObjectURL(url);
           return reject(new Error("Canvas 2D context の取得に失敗しました"));
         }
 
-        // background for JPEG
+        // JPEG 背景色（imageProcessor の共通関数を使用）
         if (settings.format === "image/jpeg") {
-          ctx.fillStyle = settings.bgColor || "#ffffff";
-          ctx.fillRect(0, 0, targetW, targetH);
+          fillJpegBackground(ctx, targetW, targetH, settings.bgColor || "#ffffff");
         }
 
         const b = settings.brightness;
         const c = settings.contrast;
         const s = settings.saturation;
         ctx.filter = `brightness(${1 + b / 100}) contrast(${1 + c / 100}) saturate(${1 + s / 100})`;
+        ctx.drawImage(stepped, 0, 0, targetW, targetH);
 
-        ctx.drawImage(canvas, 0, 0, targetW, targetH);
         URL.revokeObjectURL(url);
 
-        const quality =
-          settings.format === "image/png" ? undefined : settings.quality / 100;
-        final.toBlob(
-          (blob) => {
-            if (!blob) return reject(new Error("変換失敗"));
-            const previewUrl = URL.createObjectURL(blob);
-            resolve({ blob, previewUrl });
-          },
-          settings.format,
-          quality
-        );
+        // canvasToBlob（imageProcessor の共通関数を使用）
+        const blob = await canvasToBlob(final, settings.format, settings.quality / 100);
+        if (!blob) return reject(new Error("変換失敗"));
+        const previewUrl = URL.createObjectURL(blob);
+        resolve({ blob, previewUrl });
       } catch (e) {
         URL.revokeObjectURL(url);
         reject(e);
@@ -186,12 +152,10 @@ export default function SimpleMode() {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPreview, setSelectedPreview] = useState<string | null>(null);
-  // 8.3: AVIF 対応フラグ
   const [avifSupported, setAvifSupported] = useState<boolean | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 8.3: マウント時に AVIF 対応検出
-  // 8.4: アンマウント時に全 Object URL を revoke
+  // AVIF 検出 + アンマウント時の Object URL 全 revoke
   useEffect(() => {
     detectAvifSupport().then(setAvifSupported);
 
@@ -206,7 +170,7 @@ export default function SimpleMode() {
     };
   }, []);
 
-  // Esc キーでモーダルを閉じる（要件 4.6）
+  // Esc でモーダルを閉じる（要件 4.6）
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSelectedPreview(null);
@@ -294,7 +258,6 @@ export default function SimpleMode() {
     a.href = url;
     a.download = `${baseName}.${ext}`;
     a.click();
-    // ダウンロード後に revoke（遅延して確実に処理後）
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
@@ -302,7 +265,6 @@ export default function SimpleMode() {
     const done = files.filter((f) => f.status === "done" && f.outputBlob);
     if (done.length === 0) return;
 
-    // 8.1: CDN dynamic import を npm パッケージに変更
     const { default: JSZip } = await import("jszip");
     const zip = new JSZip();
     const ext = FORMAT_EXT[settings.format];
@@ -319,7 +281,6 @@ export default function SimpleMode() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  // 8.3: AVIF 非対応時は選択肢から除外
   const availableFormats: OutputFormat[] = [
     "image/jpeg",
     "image/png",
@@ -354,9 +315,7 @@ export default function SimpleMode() {
               ))}
             </div>
             {avifSupported === false && (
-              <p className="text-xs text-white/30">
-                ※ このブラウザは AVIF エンコード非対応
-              </p>
+              <p className="text-xs text-white/30">※ このブラウザは AVIF エンコード非対応</p>
             )}
           </section>
 
@@ -370,9 +329,7 @@ export default function SimpleMode() {
                   min={1}
                   max={100}
                   value={settings.quality}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, quality: +e.target.value }))
-                  }
+                  onChange={(e) => setSettings((s) => ({ ...s, quality: +e.target.value }))}
                   className="flex-1 accent-sky-400"
                 />
                 <span className="text-sky-400 font-mono text-sm w-8 text-right">
@@ -390,9 +347,7 @@ export default function SimpleMode() {
                 <input
                   type="color"
                   value={settings.bgColor}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, bgColor: e.target.value }))
-                  }
+                  onChange={(e) => setSettings((s) => ({ ...s, bgColor: e.target.value }))}
                   className="w-10 h-8 rounded cursor-pointer bg-transparent border-0"
                 />
                 <span className="font-mono text-sm text-white/50">{settings.bgColor}</span>
@@ -405,9 +360,7 @@ export default function SimpleMode() {
             <div className="flex items-center justify-between">
               <p className="text-xs text-white/40 uppercase tracking-widest">リサイズ</p>
               <button
-                onClick={() =>
-                  setSettings((s) => ({ ...s, resizeEnabled: !s.resizeEnabled }))
-                }
+                onClick={() => setSettings((s) => ({ ...s, resizeEnabled: !s.resizeEnabled }))}
                 aria-label={settings.resizeEnabled ? "リサイズをOFF" : "リサイズをON"}
                 className={`w-10 h-5 rounded-full transition-all relative ${
                   settings.resizeEnabled ? "bg-sky-500" : "bg-white/20"
@@ -430,11 +383,7 @@ export default function SimpleMode() {
                       placeholder="1200"
                       value={settings.width}
                       onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          width: e.target.value,
-                          preset: "",
-                        }))
+                        setSettings((s) => ({ ...s, width: e.target.value, preset: "" }))
                       }
                       className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                     />
@@ -446,11 +395,7 @@ export default function SimpleMode() {
                       placeholder="800"
                       value={settings.height}
                       onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          height: e.target.value,
-                          preset: "",
-                        }))
+                        setSettings((s) => ({ ...s, height: e.target.value, preset: "" }))
                       }
                       className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                     />
@@ -493,11 +438,7 @@ export default function SimpleMode() {
           <section className="bg-white/5 rounded-xl p-4 space-y-3">
             <p className="text-xs text-white/40 uppercase tracking-widest">調整</p>
             {(["brightness", "contrast", "saturation"] as const).map((key) => {
-              const labels = {
-                brightness: "明るさ",
-                contrast: "コントラスト",
-                saturation: "彩度",
-              };
+              const labels = { brightness: "明るさ", contrast: "コントラスト", saturation: "彩度" };
               return (
                 <div key={key}>
                   <div className="flex justify-between text-xs text-white/30 mb-1">
@@ -512,9 +453,7 @@ export default function SimpleMode() {
                     min={-100}
                     max={100}
                     value={settings[key]}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, [key]: +e.target.value }))
-                    }
+                    onChange={(e) => setSettings((s) => ({ ...s, [key]: +e.target.value }))}
                     className="w-full accent-sky-400"
                   />
                 </div>
@@ -533,17 +472,11 @@ export default function SimpleMode() {
 
         {/* ---- main area ---- */}
         <div className="space-y-4">
-          {/* privacy notice */}
-          <p className="text-xs text-white/30 text-right">
-            ブラウザ内処理 · サーバー送信なし
-          </p>
+          <p className="text-xs text-white/30 text-right">ブラウザ内処理 · サーバー送信なし</p>
 
           {/* dropzone */}
           <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setIsDragging(true);
-            }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
@@ -579,7 +512,6 @@ export default function SimpleMode() {
                 <p className="text-sm text-white/40">{files.length} ファイル</p>
                 <button
                   onClick={() => {
-                    // 8.4: すべて削除時に全 URL を revoke
                     setFiles((prev) => {
                       prev.forEach((item) => {
                         URL.revokeObjectURL(item.previewBefore);
@@ -599,30 +531,24 @@ export default function SimpleMode() {
                   key={item.id}
                   className="bg-white/5 rounded-xl p-3 flex items-center gap-3"
                 >
-                  {/* thumb before */}
                   <img
                     src={item.previewBefore}
                     alt=""
                     className="w-12 h-12 object-cover rounded-lg flex-shrink-0 cursor-pointer"
                     onClick={() => setSelectedPreview(item.previewBefore)}
                   />
-
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white truncate">{item.file.name}</p>
                     <p className="text-xs text-white/30">
                       {formatBytes(item.file.size)}
                       {item.outputSize !== undefined && (
-                        <span className="ml-2 text-sky-400">
-                          → {formatBytes(item.outputSize)}
-                        </span>
+                        <span className="ml-2 text-sky-400">→ {formatBytes(item.outputSize)}</span>
                       )}
                     </p>
                     {item.status === "error" && (
                       <p className="text-xs text-red-400 mt-0.5">{item.error}</p>
                     )}
                   </div>
-
-                  {/* status */}
                   <div className="flex-shrink-0 flex items-center gap-2">
                     {item.status === "waiting" && (
                       <span className="text-xs text-white/20">待機中</span>
