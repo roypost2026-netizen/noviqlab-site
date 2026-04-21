@@ -1,5 +1,10 @@
 import Link from "next/link";
 import ToolCard from "@/components/tools/ToolCard";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "NoviqLab — AI × DX × システム開発",
+};
 
 const activities = [
   {
@@ -35,12 +40,20 @@ export default function Home() {
           <span className="font-mono text-lg font-semibold tracking-tight text-white">
             NoviqLab
           </span>
-          <Link
-            href="/contact"
-            className="text-sm text-slate-400 hover:text-white transition-colors"
-          >
-            Contact
-          </Link>
+          <nav className="flex items-center gap-6">
+            <Link
+              href="/about"
+              className="text-sm text-slate-400 hover:text-white transition-colors"
+            >
+              運営理念
+            </Link>
+            <Link
+              href="/contact"
+              className="text-sm text-slate-400 hover:text-white transition-colors"
+            >
+              お問い合わせ
+            </Link>
+          </nav>
         </div>
       </header>
 
@@ -54,9 +67,37 @@ export default function Home() {
         <h1 className="text-3xl sm:text-5xl font-bold text-white leading-tight mb-6">
           AI × DX × システム開発
         </h1>
+        <p className="text-lg md:text-xl text-sky-400 font-semibold italic mt-3 mb-4">
+          Less, but better.
+        </p>
         <p className="text-slate-400 text-base sm:text-lg leading-relaxed max-w-2xl">
           NoviqLab（ノヴィックラボ）は、AI技術の活用・DX支援・システム開発を手がける日本のプロジェクトです。
         </p>
+
+        {/* スクロール誘導 */}
+        <div className="mt-16 mb-8 flex flex-col items-center">
+          <a
+            href="#activities"
+            className="group flex flex-col items-center gap-2 text-slate-500 hover:text-sky-400 transition-colors"
+            aria-label="下のセクションへスクロール"
+          >
+            <span className="text-xs font-mono tracking-widest">下へスクロール</span>
+            <svg
+              className="w-5 h-5 animate-bounce-slow"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 14l-7 7m0 0l-7-7m7 7V3"
+              />
+            </svg>
+          </a>
+        </div>
       </section>
 
       {/* Divider */}
@@ -65,7 +106,7 @@ export default function Home() {
       </div>
 
       {/* Activities */}
-      <section className="max-w-4xl mx-auto px-6 py-16 w-full">
+      <section id="activities" className="scroll-mt-8 max-w-4xl mx-auto px-6 py-16 w-full">
         <h2 className="font-mono text-xs text-slate-500 tracking-widest uppercase mb-10">
           主な活動
         </h2>
@@ -84,6 +125,31 @@ export default function Home() {
             </li>
           ))}
         </ul>
+
+        {/* 次セクションへの誘導 */}
+        <div className="mt-12 mb-4 flex flex-col items-center">
+          <a
+            href="#tools"
+            className="group flex flex-col items-center gap-2 text-slate-500 hover:text-sky-400 transition-colors"
+            aria-label="ツールセクションへスクロール"
+          >
+            <span className="text-xs font-mono tracking-widest">ツールへ</span>
+            <svg
+              className="w-4 h-4 animate-bounce-slow"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 14l-7 7m0 0l-7-7m7 7V3"
+              />
+            </svg>
+          </a>
+        </div>
       </section>
 
       {/* Divider */}
@@ -92,7 +158,7 @@ export default function Home() {
       </div>
 
       {/* Tools */}
-      <section className="max-w-4xl mx-auto px-6 py-16 w-full">
+      <section id="tools" className="scroll-mt-8 max-w-4xl mx-auto px-6 py-16 w-full">
         <h2 className="font-mono text-xs text-slate-500 tracking-widest uppercase mb-4">
           Tools
         </h2>
@@ -105,8 +171,33 @@ export default function Home() {
             name="Image Converter"
             icon="🖼"
             description="画像のリサイズ・形式変換。Web制作バッチ・容量自動調整対応。"
-            tags={["PNG", "JPEG", "WebP", "AVIF"]}
+            tags={["PNG", "JPEG", "WebP"]}
           />
+        </div>
+
+        {/* 次セクションへの誘導 */}
+        <div className="mt-12 mb-4 flex flex-col items-center">
+          <a
+            href="#contact"
+            className="group flex flex-col items-center gap-2 text-slate-500 hover:text-sky-400 transition-colors"
+            aria-label="お問い合わせセクションへスクロール"
+          >
+            <span className="text-xs font-mono tracking-widest">問い合わせる</span>
+            <svg
+              className="w-4 h-4 animate-bounce-slow"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 14l-7 7m0 0l-7-7m7 7V3"
+              />
+            </svg>
+          </a>
         </div>
       </section>
 
@@ -116,7 +207,7 @@ export default function Home() {
       </div>
 
       {/* CTA */}
-      <section className="max-w-4xl mx-auto px-6 py-16 w-full">
+      <section id="contact" className="scroll-mt-8 max-w-4xl mx-auto px-6 py-16 w-full">
         <p className="text-slate-400 text-sm mb-6">
           プロジェクトへのご相談・ご連絡はこちらから
         </p>
@@ -144,7 +235,17 @@ export default function Home() {
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-800">
         <div className="max-w-4xl mx-auto px-6 py-6">
-          <p className="font-mono text-xs text-slate-600">
+          <div className="mt-2 pt-4 border-t border-white/10">
+            <p className="text-sm text-white/60 text-center leading-relaxed mb-2">
+              🔒 NoviqLab のツールは、アップロードデータをサーバーに送信しません。
+            </p>
+            <p className="text-xs text-white/40 text-center">
+              <a href="/about#privacy" className="underline hover:text-sky-400 transition-colors">
+                プライバシー方針について
+              </a>
+            </p>
+          </div>
+          <p className="font-mono text-xs text-slate-600 mt-6">
             © {new Date().getFullYear()} NoviqLab
           </p>
         </div>
