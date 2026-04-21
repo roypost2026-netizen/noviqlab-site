@@ -9,7 +9,7 @@ import type {
   CropPosition,
 } from "./types";
 import { resolveAspectRatioValue } from "./imageProcessor";
-import UsageToggle from "./UsageToggle";
+import UsageToggle from "@/components/tools/common/UsageToggle";
 import { DESCRIPTIONS } from "./descriptions";
 
 interface ProfileEditorProps {

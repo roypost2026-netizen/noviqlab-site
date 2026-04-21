@@ -15,8 +15,8 @@ import { migrateBatchConfig } from "./types";
 import { processBatchImage, detectAvifSupport } from "./imageProcessor";
 import { BUILTIN_PRESETS, instantiatePreset } from "./builtinPresets";
 import ProfileEditor from "./ProfileEditor";
-import InfoAccordion from "./InfoAccordion";
-import IntroToggle from "./IntroToggle";
+import InfoAccordion from "@/components/tools/common/InfoAccordion";
+import IntroToggle from "@/components/tools/common/IntroToggle";
 import { DESCRIPTIONS } from "./descriptions";
 
 const FORMAT_EXT: Record<OutputFormat, string> = {

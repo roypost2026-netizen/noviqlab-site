@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import InfoAccordion from "./InfoAccordion";
+import InfoAccordion from "@/components/tools/common/InfoAccordion";
 
 interface IntroToggleProps {
   buttonLabel: string;

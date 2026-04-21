@@ -165,12 +165,19 @@ export default function Home() {
         <p className="text-slate-400 text-sm mb-8">
           ブラウザ内で完結する開発者向けユーティリティ。全て無料公開。
         </p>
-        <div className="max-w-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           <ToolCard
             slug="image-resizer"
             name="Image Converter"
             icon="🖼"
             description="画像のリサイズ・形式変換。Web制作バッチ・容量自動調整対応。"
+            tags={["PNG", "JPEG", "WebP"]}
+          />
+          <ToolCard
+            slug="image-splitter"
+            name="Image Splitter"
+            icon="✂️"
+            description="縦長キャプチャ画像を印刷やSlack共有に適したサイズに分割。ブラウザ内完結。"
             tags={["PNG", "JPEG", "WebP"]}
           />
         </div>

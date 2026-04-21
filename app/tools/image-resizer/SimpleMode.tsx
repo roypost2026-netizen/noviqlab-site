@@ -9,10 +9,10 @@ import {
   fillJpegBackground,
 } from "./imageProcessor";
 import type { OutputFormat } from "./types";
-import InfoAccordion from "./InfoAccordion";
+import InfoAccordion from "@/components/tools/common/InfoAccordion";
 import { DESCRIPTIONS } from "./descriptions";
-import UsageToggle from "./UsageToggle";
-import IntroToggle from "./IntroToggle";
+import UsageToggle from "@/components/tools/common/UsageToggle";
+import IntroToggle from "@/components/tools/common/IntroToggle";
 
 type FileStatus = "waiting" | "processing" | "done" | "error";
 
