@@ -12,6 +12,133 @@ const FORMAT_EXT: Record<OutputFormat, string> = {
   "image/webp": "webp",
 };
 
+const WHITESPACE_TOLERANCE = 10;
+const SEARCH_RANGE = 50;
+
+interface WhitespaceBlock {
+  start: number;
+  end: number;
+  size: number;
+  center: number;
+}
+
+function detectWhitespaceBlocks(
+  imageData: ImageData,
+  tolerance: number = WHITESPACE_TOLERANCE
+): WhitespaceBlock[] {
+  const { data, width, height } = imageData;
+  const blocks: WhitespaceBlock[] = [];
+  let currentStart: number | null = null;
+
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width * 4;
+    const baseR = data[rowStart];
+    const baseG = data[rowStart + 1];
+    const baseB = data[rowStart + 2];
+
+    let isWhitespace = true;
+    for (let x = 1; x < width; x++) {
+      const i = rowStart + x * 4;
+      if (
+        Math.abs(data[i] - baseR) > tolerance ||
+        Math.abs(data[i + 1] - baseG) > tolerance ||
+        Math.abs(data[i + 2] - baseB) > tolerance
+      ) {
+        isWhitespace = false;
+        break;
+      }
+    }
+
+    if (isWhitespace) {
+      if (currentStart === null) currentStart = y;
+    } else {
+      if (currentStart !== null) {
+        blocks.push({
+          start: currentStart,
+          end: y - 1,
+          size: y - currentStart,
+          center: Math.floor((currentStart + y - 1) / 2),
+        });
+        currentStart = null;
+      }
+    }
+  }
+
+  if (currentStart !== null) {
+    blocks.push({
+      start: currentStart,
+      end: height - 1,
+      size: height - currentStart,
+      center: Math.floor((currentStart + height - 1) / 2),
+    });
+  }
+
+  return blocks;
+}
+
+function findBestCutPosition(
+  idealY: number,
+  blocks: WhitespaceBlock[],
+  searchRange: number = SEARCH_RANGE
+): number {
+  const minY = idealY - searchRange;
+  const maxY = idealY + searchRange;
+
+  const candidates = blocks.filter(
+    (b) => b.center >= minY && b.center <= maxY
+  );
+
+  if (candidates.length === 0) return idealY;
+
+  let bestBlock = candidates[0];
+  let bestScore = candidates[0].size * 2 - Math.abs(candidates[0].center - idealY);
+
+  for (let i = 1; i < candidates.length; i++) {
+    const score = candidates[i].size * 2 - Math.abs(candidates[i].center - idealY);
+    if (score > bestScore) {
+      bestScore = score;
+      bestBlock = candidates[i];
+    }
+  }
+
+  return bestBlock.center;
+}
+
+export async function calcSmartSplitPositions(
+  imageFile: ImageFile,
+  settings: SplitSettings
+): Promise<SplitPosition[]> {
+  const idealPositions = calcSplitPositions(imageFile, settings);
+  if (idealPositions.length === 0) return [];
+
+  const img = await loadImageElement(URL.createObjectURL(imageFile.file));
+  const canvas = document.createElement("canvas");
+  canvas.width = imageFile.width;
+  canvas.height = imageFile.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas context 取得失敗");
+
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, imageFile.width, imageFile.height);
+
+  const blocks = detectWhitespaceBlocks(imageData);
+
+  const adjustedPositions: SplitPosition[] = idealPositions.map((p) => ({
+    y: findBestCutPosition(p.y, blocks),
+  }));
+
+  const uniqueYs = new Set<number>();
+  const deduped: SplitPosition[] = [];
+  for (const p of adjustedPositions) {
+    if (!uniqueYs.has(p.y)) {
+      uniqueYs.add(p.y);
+      deduped.push(p);
+    }
+  }
+
+  return deduped;
+}
+
 export function calcSplitPositions(
   imageFile: ImageFile,
   settings: SplitSettings

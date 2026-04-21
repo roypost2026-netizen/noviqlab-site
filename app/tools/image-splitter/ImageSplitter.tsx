@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ImageFile, SplitSettings, SplitResult, SplitPosition, OutputFormat } from "./types";
-import { calcSplitPositions, splitImage } from "./splitLogic";
+import { calcSplitPositions, splitImage, calcSmartSplitPositions } from "./splitLogic";
 
 const ACCEPTED_FORMATS = "image/png,image/jpeg,image/webp";
 
@@ -16,6 +16,7 @@ export default function ImageSplitter() {
   const [splitPositions, setSplitPositions] = useState<SplitPosition[]>([]);
   const [results, setResults] = useState<SplitResult[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [calculating, setCalculating] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -84,8 +85,36 @@ export default function ImageSplitter() {
       setSplitPositions([]);
       return;
     }
-    const positions = calcSplitPositions(imageFile, settings);
-    setSplitPositions(positions);
+
+    let cancelled = false;
+
+    async function calculate() {
+      setCalculating(true);
+      try {
+        let positions: SplitPosition[];
+        if (settings.smartSplit) {
+          positions = await calcSmartSplitPositions(imageFile!, settings);
+        } else {
+          positions = calcSplitPositions(imageFile!, settings);
+        }
+        if (!cancelled) {
+          setSplitPositions(positions);
+        }
+      } catch (err) {
+        console.error("分割位置計算エラー:", err);
+        if (!cancelled) {
+          setSplitPositions(calcSplitPositions(imageFile!, settings));
+        }
+      } finally {
+        if (!cancelled) setCalculating(false);
+      }
+    }
+
+    calculate();
+
+    return () => {
+      cancelled = true;
+    };
   }, [imageFile, settings]);
 
   const handleSplit = useCallback(async () => {
@@ -175,22 +204,33 @@ export default function ImageSplitter() {
                 setSettings((s) => ({ ...s, smartSplit: e.target.checked }))
               }
               className="accent-sky-400"
-              disabled
             />
-            <span className="text-sm text-white/50">
-              余白行を検出して切る（Day 2 実装予定）
+            <span className="text-sm text-white/85">
+              余白行を検出して切る
             </span>
           </label>
         </div>
 
         {/* 分割予定情報 */}
-        {imageFile && splitPositions.length > 0 && (
+        {imageFile && (
           <div className="bg-sky-500/10 border border-sky-400/20 rounded-lg p-3">
-            <p className="text-xs text-sky-300 leading-relaxed">
-              分割予定: <strong>{splitPositions.length + 1} ピース</strong>
-              <br />
-              元画像: {imageFile.width} × {imageFile.height} px
-            </p>
+            {calculating ? (
+              <p className="text-xs text-sky-300 leading-relaxed flex items-center gap-2">
+                <span className="inline-block w-3 h-3 border-2 border-sky-300 border-t-transparent rounded-full animate-spin"></span>
+                <span>分割位置を計算中...</span>
+              </p>
+            ) : splitPositions.length > 0 ? (
+              <p className="text-xs text-sky-300 leading-relaxed">
+                分割予定: <strong>{splitPositions.length + 1} ピース</strong>
+                {settings.smartSplit && <span className="ml-1">（スマート分割）</span>}
+                <br />
+                元画像: {imageFile.width} × {imageFile.height} px
+              </p>
+            ) : (
+              <p className="text-xs text-sky-300 leading-relaxed">
+                分割不要: 画像の高さが十分小さいため、このままでOKです
+              </p>
+            )}
           </div>
         )}
       </aside>
@@ -268,7 +308,7 @@ export default function ImageSplitter() {
             {/* 分割実行ボタン */}
             <button
               onClick={handleSplit}
-              disabled={processing || splitPositions.length === 0}
+              disabled={processing || calculating || splitPositions.length === 0}
               className="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-white/10 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-colors"
             >
               {processing
