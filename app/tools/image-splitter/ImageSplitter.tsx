@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ImageFile, SplitSettings, SplitResult, SplitPosition, OutputFormat } from "./types";
-import { calcSplitPositions, splitImage, calcSmartSplitPositions } from "./splitLogic";
+import { calcSplitPositions, splitImage, calcSmartSplitPositions, createSplitZip, getBaseName } from "./splitLogic";
 
 const ACCEPTED_FORMATS = "image/png,image/jpeg,image/webp";
 
@@ -116,6 +116,28 @@ export default function ImageSplitter() {
       cancelled = true;
     };
   }, [imageFile, settings]);
+
+  const handleZipDownload = useCallback(async () => {
+    if (!imageFile || results.length === 0) return;
+
+    try {
+      const zipBlob = await createSplitZip(results, imageFile.file.name);
+      const baseName = getBaseName(imageFile.file.name);
+      const zipFilename = `${baseName}-split.zip`;
+
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = zipFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("ZIP 生成エラー:", err);
+      alert("ZIP ファイルの生成に失敗しました");
+    }
+  }, [imageFile, results]);
 
   const handleSplit = useCallback(async () => {
     if (!imageFile) return;
@@ -321,9 +343,17 @@ export default function ImageSplitter() {
             {/* 分割結果 */}
             {results.length > 0 && (
               <div className="space-y-2 bg-white/5 rounded-xl p-4">
-                <h3 className="text-xs text-white/40 uppercase tracking-widest mb-3">
-                  分割結果 ({results.length} ファイル)
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs text-white/40 uppercase tracking-widest">
+                    分割結果 ({results.length} ファイル)
+                  </h3>
+                  <button
+                    onClick={handleZipDownload}
+                    className="text-xs bg-sky-500 hover:bg-sky-400 text-white font-semibold px-3 py-1.5 rounded transition-colors"
+                  >
+                    ZIP で一括DL
+                  </button>
+                </div>
                 {results.map((r) => (
                   <div
                     key={r.id}

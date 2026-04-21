@@ -1,3 +1,4 @@
+import JSZip from "jszip";
 import type {
   ImageFile,
   SplitSettings,
@@ -235,4 +236,21 @@ function canvasToBlob(
       format === "image/jpeg" || format === "image/webp" ? quality : undefined
     );
   });
+}
+
+export async function createSplitZip(
+  results: SplitResult[],
+  originalFilename: string
+): Promise<Blob> {
+  const zip = new JSZip();
+
+  for (const result of results) {
+    zip.file(result.filename, result.blob);
+  }
+
+  return await zip.generateAsync({ type: "blob" });
+}
+
+export function getBaseName(filename: string): string {
+  return filename.replace(/\.[^.]+$/, "");
 }
