@@ -68,7 +68,7 @@ export function fillJpegBackground(
 }
 
 // アスペクト比の実数値を計算
-function resolveAspectRatioValue(ar: AspectRatio): number {
+export function resolveAspectRatioValue(ar: AspectRatio): number {
   if (ar.type === "custom" && ar.customWidth && ar.customHeight) {
     return ar.customWidth / ar.customHeight;
   }

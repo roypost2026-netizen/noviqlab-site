@@ -8,6 +8,9 @@ import type {
   AspectRatioPreset,
   CropPosition,
 } from "./types";
+import { resolveAspectRatioValue } from "./imageProcessor";
+import UsageToggle from "./UsageToggle";
+import { DESCRIPTIONS } from "./descriptions";
 
 interface ProfileEditorProps {
   profile: Profile | null;
@@ -179,10 +182,19 @@ export default function ProfileEditor({
               value={draft.aspectRatio.value}
               onChange={(e) => {
                 const val = e.target.value as AspectRatioPreset;
-                setDraft((d) => ({
-                  ...d,
-                  aspectRatio: { type: val === "custom" ? "custom" : "preset", value: val },
-                }));
+                if (val !== "custom") {
+                  const newAR = { type: "preset" as const, value: val };
+                  const targetAR = resolveAspectRatioValue(newAR);
+                  setDraft((d) => ({
+                    ...d,
+                    aspectRatio: newAR,
+                    variants: d.variants.map((v) =>
+                      v.width ? { ...v, height: Math.round(v.width / targetAR) } : v
+                    ),
+                  }));
+                } else {
+                  setDraft((d) => ({ ...d, aspectRatio: { type: "custom", value: val } }));
+                }
               }}
               className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-1 focus:ring-sky-400"
             >
@@ -198,24 +210,36 @@ export default function ProfileEditor({
                   type="number"
                   placeholder="幅 (例: 16)"
                   value={draft.aspectRatio.customWidth ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      aspectRatio: { ...d.aspectRatio, customWidth: +e.target.value },
-                    }))
-                  }
+                  onChange={(e) => {
+                    const customWidth = +e.target.value;
+                    setDraft((d) => {
+                      const newAR = { ...d.aspectRatio, customWidth };
+                      const targetAR = newAR.customWidth && newAR.customHeight ? newAR.customWidth / newAR.customHeight : 0;
+                      return {
+                        ...d,
+                        aspectRatio: newAR,
+                        ...(targetAR > 0 ? { variants: d.variants.map((v) => v.width ? { ...v, height: Math.round(v.width / targetAR) } : v) } : {}),
+                      };
+                    });
+                  }}
                   className="bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                 />
                 <input
                   type="number"
                   placeholder="高さ (例: 9)"
                   value={draft.aspectRatio.customHeight ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      aspectRatio: { ...d.aspectRatio, customHeight: +e.target.value },
-                    }))
-                  }
+                  onChange={(e) => {
+                    const customHeight = +e.target.value;
+                    setDraft((d) => {
+                      const newAR = { ...d.aspectRatio, customHeight };
+                      const targetAR = newAR.customWidth && newAR.customHeight ? newAR.customWidth / newAR.customHeight : 0;
+                      return {
+                        ...d,
+                        aspectRatio: newAR,
+                        ...(targetAR > 0 ? { variants: d.variants.map((v) => v.width ? { ...v, height: Math.round(v.width / targetAR) } : v) } : {}),
+                      };
+                    });
+                  }}
                   className="bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                 />
               </div>
@@ -288,8 +312,11 @@ export default function ProfileEditor({
           </div>
 
           {/* バリアント */}
-          <div>
-            <p className="text-xs text-white/40 uppercase tracking-widest mb-2">バリアント</p>
+          <UsageToggle
+            label="バリアント"
+            simpleText={DESCRIPTIONS.batch.variant.simple}
+            technicalText={DESCRIPTIONS.batch.variant.technical}
+          >
             <div className="space-y-3">
               {draft.variants.map((v, i) => (
                 <div key={v.id} className="bg-white/5 rounded-xl p-3 space-y-2">
@@ -333,7 +360,17 @@ export default function ProfileEditor({
                         type="number"
                         placeholder="1600"
                         value={v.width || ""}
-                        onChange={(e) => updateVariant(v.id, { width: +e.target.value })}
+                        onChange={(e) => {
+                          const newWidth = +e.target.value;
+                          const ar = draft.aspectRatio;
+                          const validAR = ar.type === "preset"
+                            ? resolveAspectRatioValue(ar)
+                            : (ar.customWidth && ar.customHeight ? ar.customWidth / ar.customHeight : 0);
+                          updateVariant(v.id, {
+                            width: newWidth,
+                            ...(validAR > 0 && newWidth ? { height: Math.round(newWidth / validAR) } : {}),
+                          });
+                        }}
                         className="w-full bg-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>
@@ -375,6 +412,19 @@ export default function ProfileEditor({
                         className="w-full bg-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>
+                    {v.width > 0 && v.height > 0 && (() => {
+                      const ar = draft.aspectRatio;
+                      const validAR = ar.type === "preset"
+                        ? resolveAspectRatioValue(ar)
+                        : (ar.customWidth && ar.customHeight ? ar.customWidth / ar.customHeight : 0);
+                      if (!validAR) return null;
+                      const expectedH = Math.round(v.width / validAR);
+                      return Math.abs(v.height - expectedH) > 1 ? (
+                        <p className="col-span-2 text-xs text-amber-400">
+                          ⚠️ 高さが比率と一致していません（期待値: {expectedH}px）
+                        </p>
+                      ) : null;
+                    })()}
                     {v.minBytes && v.maxBytes && v.minBytes > v.maxBytes && (
                       <p className="col-span-2 text-xs text-red-400">下限が上限を超えています</p>
                     )}
@@ -388,7 +438,7 @@ export default function ProfileEditor({
             >
               + バリアント追加
             </button>
-          </div>
+          </UsageToggle>
 
           {/* エラー */}
           {errors.length > 0 && (

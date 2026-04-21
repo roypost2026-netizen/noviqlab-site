@@ -15,6 +15,9 @@ import { migrateBatchConfig } from "./types";
 import { processBatchImage, detectAvifSupport } from "./imageProcessor";
 import { BUILTIN_PRESETS, instantiatePreset } from "./builtinPresets";
 import ProfileEditor from "./ProfileEditor";
+import InfoAccordion from "./InfoAccordion";
+import IntroToggle from "./IntroToggle";
+import { DESCRIPTIONS } from "./descriptions";
 
 const FORMAT_EXT: Record<OutputFormat, string> = {
   "image/jpeg": "jpg",
@@ -26,6 +29,12 @@ const FORMAT_EXT: Record<OutputFormat, string> = {
 const STORAGE_KEY = "image-resizer-batch-profiles";
 const SUFFIX_RE = /^[a-zA-Z0-9_-]*$/;
 const MAX_IMAGES_PER_PROFILE = 50;
+
+const PRESET_DEFAULT_NAMES = new Set(["content", "blog", "product", "ogp"]);
+
+function isDefaultPresetName(profile: Profile): boolean {
+  return PRESET_DEFAULT_NAMES.has(profile.name) && profile.name === profile.baseFilename;
+}
 
 function genId(): string {
   try { return crypto.randomUUID(); }
@@ -86,6 +95,10 @@ export default function BatchMode() {
   const [progress, setProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [avifSupported, setAvifSupported] = useState(false);
   const [showPresetDropdown, setShowPresetDropdown] = useState(false);
+  const [showPresetGuide, setShowPresetGuide] = useState(false);
+  const [showProfileGuide, setShowProfileGuide] = useState(false);
+  const [showJsonGuide, setShowJsonGuide] = useState(false);
+  const [showAssignGuide, setShowAssignGuide] = useState(false);
   const multiFileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const initialized = useRef(false);
@@ -356,11 +369,29 @@ export default function BatchMode() {
 
   return (
     <>
+      {/* ページ冒頭: このモードについて */}
+      <div className="mb-6">
+        <IntroToggle
+          buttonLabel="このモードについて"
+          simpleText={DESCRIPTIONS.batch.intro.simple}
+          technicalText={DESCRIPTIONS.batch.intro.technical}
+        />
+      </div>
+
       {/* プロファイル管理セクション */}
       <div className="space-y-4 mb-8">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest">バッチプロファイル</h2>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest">バッチプロファイル</h2>
+            <button
+              onClick={() => setShowProfileGuide(!showProfileGuide)}
+              className="text-xs text-white/40 hover:text-sky-400 transition-colors flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/5"
+            >
+              <span>{showProfileGuide ? "▲" : ""}</span>
+              <span>プロファイルとは?</span>
+            </button>
+          </div>
+          <div className="flex gap-2 items-center">
             <button
               onClick={() => { setEditingProfile(null); setIsEditorOpen(true); }}
               className="text-xs bg-sky-500 hover:bg-sky-400 text-white px-3 py-1.5 rounded-lg transition-all"
@@ -389,8 +420,37 @@ export default function BatchMode() {
                 </div>
               )}
             </div>
+            <button
+              onClick={() => setShowPresetGuide(!showPresetGuide)}
+              className="text-xs text-white/40 hover:text-sky-400 transition-colors flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/5"
+            >
+              <span>{showPresetGuide ? "▲" : ""}</span>
+              <span>プリセットの選び方</span>
+            </button>
           </div>
         </div>
+
+        {showProfileGuide && (
+          <div className="bg-white/5 rounded-lg p-3 space-y-2 border border-white/10">
+            <p className="text-sm text-white/85 leading-relaxed whitespace-pre-line">
+              {DESCRIPTIONS.batch.profile.simple}
+            </p>
+            <InfoAccordion>
+              <p className="whitespace-pre-line">{DESCRIPTIONS.batch.profile.technical}</p>
+            </InfoAccordion>
+          </div>
+        )}
+
+        {showPresetGuide && (
+          <div className="bg-white/5 rounded-lg p-3 space-y-2 border border-white/10">
+            <p className="text-sm text-white/85 leading-relaxed whitespace-pre-line">
+              {DESCRIPTIONS.batch.presetGuide.simple}
+            </p>
+            <InfoAccordion>
+              <p className="whitespace-pre-line">{DESCRIPTIONS.batch.presetGuide.technical}</p>
+            </InfoAccordion>
+          </div>
+        )}
 
         {profiles.length === 0 ? (
           <div className="bg-white/5 rounded-xl p-8 text-center text-white/30 text-sm">
@@ -400,6 +460,21 @@ export default function BatchMode() {
           <div className="space-y-3">
             {profiles.map((profile) => (
               <div key={profile.id} className="bg-white/5 rounded-xl p-4">
+                {isDefaultPresetName(profile) && (
+                  <div className="mb-3 bg-amber-500/10 border border-amber-400/30 rounded-lg p-2">
+                    <p className="text-xs text-amber-300">
+                      💡 プロファイル名が「{profile.name}」のままです。
+                      用途に合わせた名前（例: truck / tools など）に変更することをおすすめします。
+                      このまま使うと <span className="font-mono">{profile.name}-a.jpg</span> のような一般的な名前で出力されます。
+                    </p>
+                    <button
+                      onClick={() => { setEditingProfile(profile); setIsEditorOpen(true); }}
+                      className="mt-1 text-xs text-amber-400 hover:text-amber-300 underline"
+                    >
+                      今すぐ編集
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -441,7 +516,7 @@ export default function BatchMode() {
         )}
 
         {/* JSON Import/Export */}
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
           {profiles.length > 0 && (
             <button
               onClick={handleExportJson}
@@ -456,7 +531,25 @@ export default function BatchMode() {
           >
             JSONから読み込み
           </button>
+          <button
+            onClick={() => setShowJsonGuide(!showJsonGuide)}
+            className="text-xs text-white/40 hover:text-sky-400 transition-colors flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/5"
+          >
+            <span>{showJsonGuide ? "▲" : ""}</span>
+            <span>使い方</span>
+          </button>
         </div>
+
+        {showJsonGuide && (
+          <div className="bg-white/5 rounded-lg p-3 space-y-2 border border-white/10">
+            <p className="text-sm text-white/85 leading-relaxed whitespace-pre-line">
+              {DESCRIPTIONS.batch.jsonIO.simple}
+            </p>
+            <InfoAccordion>
+              <p className="whitespace-pre-line">{DESCRIPTIONS.batch.jsonIO.technical}</p>
+            </InfoAccordion>
+          </div>
+        )}
         <input
           ref={jsonInputRef}
           type="file"
@@ -473,9 +566,29 @@ export default function BatchMode() {
       {/* 画像割り当てセクション */}
       {profiles.length > 0 && (
         <div className="space-y-4 mb-8">
-          <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest">
-            画像を割り当てて生成
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest">
+              画像を割り当てて生成
+            </h2>
+            <button
+              onClick={() => setShowAssignGuide(!showAssignGuide)}
+              className="text-xs text-white/40 hover:text-sky-400 transition-colors flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/5"
+            >
+              <span>{showAssignGuide ? "▲" : ""}</span>
+              <span>使い方</span>
+            </button>
+          </div>
+
+          {showAssignGuide && (
+            <div className="bg-white/5 rounded-lg p-3 space-y-2 border border-white/10">
+              <p className="text-sm text-white/85 leading-relaxed whitespace-pre-line">
+                {DESCRIPTIONS.batch.imageAssign.simple}
+              </p>
+              <InfoAccordion>
+                <p className="whitespace-pre-line">{DESCRIPTIONS.batch.imageAssign.technical}</p>
+              </InfoAccordion>
+            </div>
+          )}
 
           <div className="space-y-4">
             {assignments.map((assignment) => {

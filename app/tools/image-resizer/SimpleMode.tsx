@@ -9,6 +9,10 @@ import {
   fillJpegBackground,
 } from "./imageProcessor";
 import type { OutputFormat } from "./types";
+import InfoAccordion from "./InfoAccordion";
+import { DESCRIPTIONS } from "./descriptions";
+import UsageToggle from "./UsageToggle";
+import IntroToggle from "./IntroToggle";
 
 type FileStatus = "waiting" | "processing" | "done" | "error";
 
@@ -293,180 +297,225 @@ export default function SimpleMode() {
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
+      {/* ページ冒頭: このツールについて + 個人情報保護 */}
+      <div className="mb-6 flex flex-wrap gap-2">
+        <IntroToggle
+          buttonLabel="このツールについて"
+          simpleText={DESCRIPTIONS.intro.simple}
+          technicalText={DESCRIPTIONS.intro.technical}
+        />
+        <IntroToggle
+          buttonLabel="個人情報保護について"
+          simpleText={DESCRIPTIONS.privacy.simple}
+          technicalText={DESCRIPTIONS.privacy.technical}
+          variant="privacy"
+        />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
         {/* ---- sidebar ---- */}
         <aside className="space-y-5">
           {/* format */}
-          <section className="bg-white/5 rounded-xl p-4 space-y-3">
-            <p className="text-xs text-white/40 uppercase tracking-widest">出力形式</p>
-            <div className="grid grid-cols-2 gap-2">
-              {availableFormats.map((fmt) => (
-                <button
-                  key={fmt}
-                  onClick={() => setSettings((s) => ({ ...s, format: fmt }))}
-                  className={`py-2 rounded-lg text-sm font-mono transition-all ${
-                    settings.format === fmt
-                      ? "bg-sky-500 text-white"
-                      : "bg-white/5 text-white/50 hover:bg-white/10"
-                  }`}
-                >
-                  {FORMAT_EXT[fmt].toUpperCase()}
-                </button>
-              ))}
-            </div>
-            {avifSupported === false && (
-              <p className="text-xs text-white/30">※ このブラウザは AVIF エンコード非対応</p>
-            )}
+          <section className="bg-white/5 rounded-xl p-4">
+            <UsageToggle
+              label="出力形式"
+              simpleText={DESCRIPTIONS.outputFormat.simple}
+              technicalText={DESCRIPTIONS.outputFormat.technical}
+            >
+              <div className="grid grid-cols-2 gap-2">
+                {availableFormats.map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => setSettings((s) => ({ ...s, format: fmt }))}
+                    className={`py-2 rounded-lg text-sm font-mono transition-all ${
+                      settings.format === fmt
+                        ? "bg-sky-500 text-white"
+                        : "bg-white/5 text-white/50 hover:bg-white/10"
+                    }`}
+                  >
+                    {FORMAT_EXT[fmt].toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              {avifSupported === false && (
+                <p className="text-xs text-white/30">※ このブラウザは AVIF エンコード非対応</p>
+              )}
+            </UsageToggle>
           </section>
 
           {/* quality */}
           {settings.format !== "image/png" && (
-            <section className="bg-white/5 rounded-xl p-4 space-y-3">
-              <p className="text-xs text-white/40 uppercase tracking-widest">画質</p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={1}
-                  max={100}
-                  value={settings.quality}
-                  onChange={(e) => setSettings((s) => ({ ...s, quality: +e.target.value }))}
-                  className="flex-1 accent-sky-400"
-                />
-                <span className="text-sky-400 font-mono text-sm w-8 text-right">
-                  {settings.quality}
-                </span>
-              </div>
+            <section className="bg-white/5 rounded-xl p-4">
+              <UsageToggle
+                label="画質"
+                simpleText={DESCRIPTIONS.quality.simple}
+                technicalText={DESCRIPTIONS.quality.technical}
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={1}
+                    max={100}
+                    value={settings.quality}
+                    onChange={(e) => setSettings((s) => ({ ...s, quality: +e.target.value }))}
+                    className="flex-1 accent-sky-400"
+                  />
+                  <span className="text-sky-400 font-mono text-sm w-8 text-right">
+                    {settings.quality}
+                  </span>
+                </div>
+              </UsageToggle>
             </section>
           )}
 
           {/* bg color for jpeg */}
           {settings.format === "image/jpeg" && (
-            <section className="bg-white/5 rounded-xl p-4 space-y-3">
-              <p className="text-xs text-white/40 uppercase tracking-widest">透過→背景色</p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={settings.bgColor}
-                  onChange={(e) => setSettings((s) => ({ ...s, bgColor: e.target.value }))}
-                  className="w-10 h-8 rounded cursor-pointer bg-transparent border-0"
-                />
-                <span className="font-mono text-sm text-white/50">{settings.bgColor}</span>
-              </div>
+            <section className="bg-white/5 rounded-xl p-4">
+              <UsageToggle
+                label="透過→背景色"
+                simpleText={DESCRIPTIONS.bgColor.simple}
+                technicalText={DESCRIPTIONS.bgColor.technical}
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={settings.bgColor}
+                    onChange={(e) => setSettings((s) => ({ ...s, bgColor: e.target.value }))}
+                    className="w-10 h-8 rounded cursor-pointer bg-transparent border-0"
+                  />
+                  <span className="font-mono text-sm text-white/50">{settings.bgColor}</span>
+                </div>
+              </UsageToggle>
             </section>
           )}
 
           {/* resize */}
-          <section className="bg-white/5 rounded-xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-white/40 uppercase tracking-widest">リサイズ</p>
-              <button
-                onClick={() => setSettings((s) => ({ ...s, resizeEnabled: !s.resizeEnabled }))}
-                aria-label={settings.resizeEnabled ? "リサイズをOFF" : "リサイズをON"}
-                className={`w-10 h-5 rounded-full transition-all relative ${
-                  settings.resizeEnabled ? "bg-sky-500" : "bg-white/20"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                    settings.resizeEnabled ? "left-5" : "left-0.5"
+          <section className="bg-white/5 rounded-xl p-4">
+            <UsageToggle
+              label="リサイズ"
+              simpleText={DESCRIPTIONS.resize.simple}
+              technicalText={DESCRIPTIONS.resize.technical}
+            >
+              <div className="flex items-center justify-end">
+                <button
+                  onClick={() => setSettings((s) => ({ ...s, resizeEnabled: !s.resizeEnabled }))}
+                  aria-label={settings.resizeEnabled ? "リサイズをOFF" : "リサイズをON"}
+                  className={`w-10 h-5 rounded-full transition-all relative ${
+                    settings.resizeEnabled ? "bg-sky-500" : "bg-white/20"
                   }`}
-                />
-              </button>
-            </div>
-            {settings.resizeEnabled && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <p className="text-xs text-white/30 mb-1">幅 px</p>
-                    <input
-                      type="number"
-                      placeholder="1200"
-                      value={settings.width}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, width: e.target.value, preset: "" }))
-                      }
-                      className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
-                    />
-                  </div>
-                  <div>
-                    <p className="text-xs text-white/30 mb-1">高さ px</p>
-                    <input
-                      type="number"
-                      placeholder="800"
-                      value={settings.height}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, height: e.target.value, preset: "" }))
-                      }
-                      className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
-                    />
-                  </div>
-                </div>
-                <label className="flex items-center gap-2 text-xs text-white/40 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.keepAspect}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, keepAspect: e.target.checked }))
-                    }
-                    className="accent-sky-400"
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                      settings.resizeEnabled ? "left-5" : "left-0.5"
+                    }`}
                   />
-                  アスペクト比を維持
-                </label>
-                <div>
-                  <p className="text-xs text-white/30 mb-2">プリセット</p>
-                  <div className="grid grid-cols-1 gap-1">
-                    {PRESETS.map((p) => (
-                      <button
-                        key={p.label}
-                        onClick={() => applyPreset(p)}
-                        className={`text-left px-3 py-1.5 rounded-lg text-xs transition-all ${
-                          settings.preset === p.label
-                            ? "bg-sky-500/20 text-sky-400"
-                            : "hover:bg-white/10 text-white/40"
-                        }`}
-                      >
-                        {p.label} — {p.width}×{p.height}
-                      </button>
-                    ))}
+                </button>
+              </div>
+              {settings.resizeEnabled && (
+                <div className="space-y-3 mt-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-xs text-white/30 mb-1">幅 px</p>
+                      <input
+                        type="number"
+                        placeholder="1200"
+                        value={settings.width}
+                        onChange={(e) =>
+                          setSettings((s) => ({ ...s, width: e.target.value, preset: "" }))
+                        }
+                        className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-white/30 mb-1">高さ px</p>
+                      <input
+                        type="number"
+                        placeholder="800"
+                        value={settings.height}
+                        onChange={(e) =>
+                          setSettings((s) => ({ ...s, height: e.target.value, preset: "" }))
+                        }
+                        className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-white/40 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.keepAspect}
+                      onChange={(e) =>
+                        setSettings((s) => ({ ...s, keepAspect: e.target.checked }))
+                      }
+                      className="accent-sky-400"
+                    />
+                    アスペクト比を維持
+                  </label>
+                  <div>
+                    <UsageToggle
+                      label="プリセット"
+                      labelClassName="text-xs text-white/30"
+                      simpleText={DESCRIPTIONS.preset.simple}
+                      technicalText={DESCRIPTIONS.preset.technical}
+                    >
+                      <div className="grid grid-cols-1 gap-1">
+                        {PRESETS.map((p) => (
+                          <button
+                            key={p.label}
+                            onClick={() => applyPreset(p)}
+                            className={`text-left px-3 py-1.5 rounded-lg text-xs transition-all ${
+                              settings.preset === p.label
+                                ? "bg-sky-500/20 text-sky-400"
+                                : "hover:bg-white/10 text-white/40"
+                            }`}
+                          >
+                            {p.label} — {p.width}×{p.height}
+                          </button>
+                        ))}
+                      </div>
+                    </UsageToggle>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </UsageToggle>
           </section>
 
           {/* adjustments */}
-          <section className="bg-white/5 rounded-xl p-4 space-y-3">
-            <p className="text-xs text-white/40 uppercase tracking-widest">調整</p>
-            {(["brightness", "contrast", "saturation"] as const).map((key) => {
-              const labels = { brightness: "明るさ", contrast: "コントラスト", saturation: "彩度" };
-              return (
-                <div key={key}>
-                  <div className="flex justify-between text-xs text-white/30 mb-1">
-                    <span>{labels[key]}</span>
-                    <span className="font-mono text-sky-400">
-                      {settings[key] > 0 ? "+" : ""}
-                      {settings[key]}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={-100}
-                    max={100}
-                    value={settings[key]}
-                    onChange={(e) => setSettings((s) => ({ ...s, [key]: +e.target.value }))}
-                    className="w-full accent-sky-400"
-                  />
-                </div>
-              );
-            })}
-            <button
-              onClick={() =>
-                setSettings((s) => ({ ...s, brightness: 0, contrast: 0, saturation: 0 }))
-              }
-              className="text-xs text-white/20 hover:text-white/40 transition-colors"
+          <section className="bg-white/5 rounded-xl p-4">
+            <UsageToggle
+              label="調整"
+              simpleText={DESCRIPTIONS.adjust.simple}
+              technicalText={DESCRIPTIONS.adjust.technical}
             >
-              リセット
-            </button>
+              {(["brightness", "contrast", "saturation"] as const).map((key) => {
+                const labels = { brightness: "明るさ", contrast: "コントラスト", saturation: "彩度" };
+                return (
+                  <div key={key}>
+                    <div className="flex justify-between text-xs text-white/30 mb-1">
+                      <span>{labels[key]}</span>
+                      <span className="font-mono text-sky-400">
+                        {settings[key] > 0 ? "+" : ""}
+                        {settings[key]}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-100}
+                      max={100}
+                      value={settings[key]}
+                      onChange={(e) => setSettings((s) => ({ ...s, [key]: +e.target.value }))}
+                      className="w-full accent-sky-400"
+                    />
+                  </div>
+                );
+              })}
+              <button
+                onClick={() =>
+                  setSettings((s) => ({ ...s, brightness: 0, contrast: 0, saturation: 0 }))
+                }
+                className="text-xs text-white/20 hover:text-white/40 transition-colors"
+              >
+                リセット
+              </button>
+            </UsageToggle>
           </section>
         </aside>
 
@@ -486,15 +535,20 @@ export default function SimpleMode() {
               if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
             }}
             aria-label="画像をドロップ、またはクリックして選択"
-            className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
+            className={`min-h-[240px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all px-6 py-8 ${
               isDragging
-                ? "border-sky-400 bg-sky-400/5"
-                : "border-white/10 hover:border-white/20 hover:bg-white/5"
+                ? "border-sky-400 bg-sky-400/10"
+                : "border-white/30 hover:border-white/50 hover:bg-white/5"
             }`}
           >
-            <div className="text-4xl mb-3">🖼️</div>
-            <p className="text-white/50 text-sm">画像をドロップ、またはクリックして選択</p>
-            <p className="text-white/20 text-xs mt-1">PNG・JPEG・WebP・AVIF など対応</p>
+            <div className="text-7xl mb-4">🖼️</div>
+            <p className="text-base text-white/90 font-medium mb-2 text-center">
+              画像をドロップ、またはクリックして選択
+            </p>
+            <p className="text-sm text-white/70 text-center leading-relaxed">
+              一度に何枚でも選べます<br />
+              対応形式: PNG / JPEG / WebP / AVIF
+            </p>
             <input
               ref={fileInputRef}
               type="file"
@@ -504,7 +558,6 @@ export default function SimpleMode() {
               onChange={(e) => e.target.files && addFiles(e.target.files)}
             />
           </div>
-
           {/* file list */}
           {files.length > 0 && (
             <div className="space-y-2">
