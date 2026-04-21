@@ -25,6 +25,8 @@ interface ImageFile {
   outputBlob?: Blob;
   outputSize?: number;
   error?: string;
+  originalWidth?: number;
+  originalHeight?: number;
 }
 
 interface Settings {
@@ -55,6 +57,18 @@ const PRESETS = [
   { label: "フルHD", width: 1920, height: 1080 },
   { label: "4K", width: 3840, height: 2160 },
 ];
+
+function calcAspectRatio(settings: Settings, files: ImageFile[]): number | null {
+  if (!settings.keepAspect) return null;
+  const firstFile = files.find((f) => f.originalWidth && f.originalHeight);
+  if (firstFile?.originalWidth && firstFile?.originalHeight) {
+    return firstFile.originalWidth / firstFile.originalHeight;
+  }
+  const w = Number(settings.width);
+  const h = Number(settings.height);
+  if (w > 0 && h > 0) return w / h;
+  return null;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -192,6 +206,21 @@ export default function SimpleMode() {
       previewBefore: URL.createObjectURL(f),
     }));
     setFiles((prev) => [...prev, ...items]);
+
+    // 元画像のサイズを取得してアスペクト比計算に利用
+    items.forEach((item) => {
+      const img = new Image();
+      img.onload = () => {
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === item.id
+              ? { ...f, originalWidth: img.naturalWidth, originalHeight: img.naturalHeight }
+              : f
+          )
+        );
+      };
+      img.src = item.previewBefore;
+    });
   }, []);
 
   const handleDrop = useCallback(
@@ -419,9 +448,18 @@ export default function SimpleMode() {
                         type="number"
                         placeholder="1200"
                         value={settings.width}
-                        onChange={(e) =>
-                          setSettings((s) => ({ ...s, width: e.target.value, preset: "" }))
-                        }
+                        onChange={(e) => {
+                          const newWidth = e.target.value;
+                          setSettings((s) => {
+                            const ar = calcAspectRatio(s, files);
+                            const newWidthNum = Number(newWidth);
+                            const newHeight =
+                              ar && newWidthNum > 0
+                                ? String(Math.round(newWidthNum / ar))
+                                : s.height;
+                            return { ...s, width: newWidth, height: newHeight, preset: "" };
+                          });
+                        }}
                         className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>
@@ -431,9 +469,18 @@ export default function SimpleMode() {
                         type="number"
                         placeholder="800"
                         value={settings.height}
-                        onChange={(e) =>
-                          setSettings((s) => ({ ...s, height: e.target.value, preset: "" }))
-                        }
+                        onChange={(e) => {
+                          const newHeight = e.target.value;
+                          setSettings((s) => {
+                            const ar = calcAspectRatio(s, files);
+                            const newHeightNum = Number(newHeight);
+                            const newWidth =
+                              ar && newHeightNum > 0
+                                ? String(Math.round(newHeightNum * ar))
+                                : s.width;
+                            return { ...s, width: newWidth, height: newHeight, preset: "" };
+                          });
+                        }}
                         className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>

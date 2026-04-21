@@ -390,11 +390,24 @@ export default function ProfileEditor({
                         type="number"
                         placeholder="200"
                         value={v.minBytes !== undefined ? Math.round(v.minBytes / 1024) : ""}
-                        onChange={(e) =>
-                          updateVariant(v.id, {
-                            minBytes: e.target.value ? +e.target.value * 1024 : undefined,
-                          })
-                        }
+                        onChange={(e) => {
+                          const newMinBytes = e.target.value ? +e.target.value * 1024 : undefined;
+                          const oldMinBytes = v.minBytes;
+                          const oldMaxBytes = v.maxBytes;
+                          if (
+                            newMinBytes && newMinBytes > 0 &&
+                            oldMinBytes && oldMinBytes > 0 &&
+                            oldMaxBytes && oldMaxBytes > 0
+                          ) {
+                            const ratio = newMinBytes / oldMinBytes;
+                            updateVariant(v.id, {
+                              minBytes: newMinBytes,
+                              maxBytes: Math.round(oldMaxBytes * ratio),
+                            });
+                          } else {
+                            updateVariant(v.id, { minBytes: newMinBytes });
+                          }
+                        }}
                         className="w-full bg-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>
@@ -404,11 +417,24 @@ export default function ProfileEditor({
                         type="number"
                         placeholder="300"
                         value={v.maxBytes !== undefined ? Math.round(v.maxBytes / 1024) : ""}
-                        onChange={(e) =>
-                          updateVariant(v.id, {
-                            maxBytes: e.target.value ? +e.target.value * 1024 : undefined,
-                          })
-                        }
+                        onChange={(e) => {
+                          const newMaxBytes = e.target.value ? +e.target.value * 1024 : undefined;
+                          const oldMinBytes = v.minBytes;
+                          const oldMaxBytes = v.maxBytes;
+                          if (
+                            newMaxBytes && newMaxBytes > 0 &&
+                            oldMinBytes && oldMinBytes > 0 &&
+                            oldMaxBytes && oldMaxBytes > 0
+                          ) {
+                            const ratio = newMaxBytes / oldMaxBytes;
+                            updateVariant(v.id, {
+                              minBytes: Math.round(oldMinBytes * ratio),
+                              maxBytes: newMaxBytes,
+                            });
+                          } else {
+                            updateVariant(v.id, { maxBytes: newMaxBytes });
+                          }
+                        }}
                         className="w-full bg-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
                       />
                     </div>
