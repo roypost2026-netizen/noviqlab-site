@@ -3,6 +3,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ImageFile, SplitSettings, SplitResult, SplitPosition, OutputFormat } from "./types";
 import { calcSplitPositions, splitImage, calcSmartSplitPositions, createSplitZip, getBaseName } from "./splitLogic";
+import IntroToggle from "@/components/tools/common/IntroToggle";
+import UsageToggle from "@/components/tools/common/UsageToggle";
+import { DESCRIPTIONS } from "./descriptions";
 
 const ACCEPTED_FORMATS = "image/png,image/jpeg,image/webp";
 
@@ -155,12 +158,29 @@ export default function ImageSplitter() {
   }, [imageFile, splitPositions, results]);
 
   return (
+    <>
+    <div className="flex flex-wrap gap-3 mt-6 mb-2">
+      <IntroToggle
+        buttonLabel="このツールについて"
+        simpleText={DESCRIPTIONS.intro.simple}
+        technicalText={DESCRIPTIONS.intro.technical}
+      />
+      <IntroToggle
+        buttonLabel="個人情報保護について"
+        variant="privacy"
+        simpleText={DESCRIPTIONS.privacy.simple}
+        technicalText={DESCRIPTIONS.privacy.technical}
+      />
+    </div>
     <div className="mt-8 flex flex-col lg:flex-row gap-6">
       {/* サイドバー */}
       <aside className="w-full lg:w-[360px] space-y-6 shrink-0">
         {/* 分割モード */}
-        <div>
-          <p className="text-xs text-white/40 uppercase tracking-widest mb-2">分割モード</p>
+        <UsageToggle
+          label="分割モード"
+          simpleText={DESCRIPTIONS.splitMode.simple}
+          technicalText={DESCRIPTIONS.splitMode.technical}
+        >
           <div className="space-y-2">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -183,12 +203,15 @@ export default function ImageSplitter() {
               <span className="text-sm text-white/85">A4印刷用</span>
             </label>
           </div>
-        </div>
+        </UsageToggle>
 
         {/* 高さ px（fixed時のみ） */}
         {settings.mode === "fixed" && (
-          <div>
-            <p className="text-xs text-white/40 uppercase tracking-widest mb-2">高さ px</p>
+          <UsageToggle
+            label="高さ px"
+            simpleText={DESCRIPTIONS.height.simple}
+            technicalText={DESCRIPTIONS.height.technical}
+          >
             <input
               type="number"
               min={100}
@@ -201,7 +224,7 @@ export default function ImageSplitter() {
               }
               className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:ring-1 focus:ring-sky-400"
             />
-          </div>
+          </UsageToggle>
         )}
 
         {/* A4モードの説明 */}
@@ -216,8 +239,11 @@ export default function ImageSplitter() {
         )}
 
         {/* スマート分割トグル */}
-        <div>
-          <p className="text-xs text-white/40 uppercase tracking-widest mb-2">スマート分割</p>
+        <UsageToggle
+          label="スマート分割"
+          simpleText={DESCRIPTIONS.smartSplit.simple}
+          technicalText={DESCRIPTIONS.smartSplit.technical}
+        >
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -227,11 +253,9 @@ export default function ImageSplitter() {
               }
               className="accent-sky-400"
             />
-            <span className="text-sm text-white/85">
-              余白行を検出して切る
-            </span>
+            <span className="text-sm text-white/85">余白行を検出して切る</span>
           </label>
-        </div>
+        </UsageToggle>
 
         {/* 分割予定情報 */}
         {imageFile && (
@@ -380,5 +404,6 @@ export default function ImageSplitter() {
         )}
       </section>
     </div>
+    </>
   );
 }
