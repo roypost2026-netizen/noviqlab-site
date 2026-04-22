@@ -14,7 +14,14 @@ const TOOLS = [
     name: "Image Converter",
     icon: "🖼",
     description: "画像のリサイズ・形式変換。Web制作バッチ・容量自動調整対応。",
-    tags: ["PNG", "JPEG", "WebP", "AVIF"],
+    tags: ["PNG", "JPEG", "WebP"],
+  },
+  {
+    slug: "image-splitter",
+    name: "Image Splitter",
+    icon: "✂️",
+    description: "縦長キャプチャ画像を印刷やSlack共有に適したサイズに分割。ブラウザ内完結。",
+    tags: ["PNG", "JPEG", "WebP"],
   },
 ];
 
